@@ -1,0 +1,7 @@
+# Actual Windows CPython 3.12 validation environment; optional QEM packages included.
+numpy==2.5.4
+scikit-image==0.26.0
+scipy==1.18.1
+fast-simplification==0.2.0
+trimesh==5.2.0
+rtree==1.4.1

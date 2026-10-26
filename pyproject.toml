@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coventor-vdata-standalone"
+version = "0.2.0"
+description = "Independent VoxelXML decoder and open-source surface reconstruction; no vendor SDK runtime"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26,<3", "scikit-image>=0.25,<0.27", "scipy>=1.14,<2"]
+
+[project.optional-dependencies]
+qem = ["fast-simplification==0.2.0", "trimesh>=4.6,<6", "rtree>=1.3,<2", "scipy>=1.14,<2"]
+
+[project.scripts]
+vdata-convert = "vdata_standalone.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vdata_standalone*"]

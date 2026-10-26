@@ -1,7 +1,5 @@
-# Optional: only needed for QEM and sampled point-to-triangle validation.
-# Install with the Python interpreter used to run convert_reduced.py.
-numpy>=1.26,<3
-scipy>=1.14,<2
+-r requirements.txt
 fast-simplification==0.2.0
 trimesh>=4.6,<6
 rtree>=1.3,<2
+scipy>=1.14,<2

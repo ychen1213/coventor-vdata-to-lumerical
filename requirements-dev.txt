@@ -1,0 +1,2 @@
+-r requirements-qem.txt
+pytest>=8,<10
