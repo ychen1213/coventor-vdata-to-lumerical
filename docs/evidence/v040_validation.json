@@ -1,0 +1,185 @@
+{
+  "schema": "vdata-standalone-v040-validation-v1",
+  "version": "0.4.0",
+  "validation_date": "2026-10-28",
+  "timezone": "Asia/Hong_Kong",
+  "automated_tests": {
+    "passed": 242,
+    "subtests_passed": 106,
+    "failed": 0,
+    "seconds": 26.62,
+    "warnings": "Dependency deprecations from NumPy/scikit-image and hdf5storage; no test failures."
+  },
+  "mat_compatibility": {
+    "new_export": "MATLAB v7.3 / HDF5 written with hdf5storage 0.2.2 and h5py 3.16.0",
+    "tested_cad": "Lumerical FDTD 2025 R2, Windows",
+    "scipy_legacy_v5_load": "Rejected by the tested installation for both compressed and uncompressed files; legacy export-planar retained with a compatibility note.",
+    "matlab_installation_or_sdk_required_for_conversion": false,
+    "coventor_sdk_required": false
+  },
+  "real_ah53": {
+    "input_triangles": 2463058,
+    "polygon_facets": 578836,
+    "merged_polygon_facets": 191544,
+    "retained_triangle_facets": 387292,
+    "facet_reduction_percent": 76.49929477909167,
+    "largest_loop": 5146,
+    "baseline": {
+      "status": "completed",
+      "vertex_count": 1231531,
+      "facet_count": 578836,
+      "mat_bytes": 5292505,
+      "fsp_bytes": 48358140,
+      "stages": [
+        {
+          "name": "open_owned_hidden_cad",
+          "seconds": 9.928927400149405
+        },
+        {
+          "name": "disable_redraw",
+          "seconds": 0.0003654998727142811
+        },
+        {
+          "name": "execute_generated_script",
+          "seconds": 24.979902799939737
+        },
+        {
+          "name": "read_vertices",
+          "seconds": 0.09060460003092885
+        },
+        {
+          "name": "save_fsp",
+          "seconds": 2.562520500039682
+        },
+        {
+          "name": "reopen_fsp",
+          "seconds": 7.822751099942252
+        },
+        {
+          "name": "read_reopened_vertices",
+          "seconds": 0.09081439999863505
+        }
+      ],
+      "cad_peak_private_bytes": 1184735232,
+      "cad_peak_working_set_bytes": 1144934400,
+      "checks": {
+        "initial_vertex_table_exact": true,
+        "all_vertices_retained_on_reopen": true,
+        "reopened_coordinates_match_within_serialization_roundoff": true,
+        "translation_applied_once": true,
+        "group_translation_zero": true,
+        "material_preserved": true,
+        "no_object_rotation": true
+      },
+      "reopened_max_vertex_coordinate_distance_m": 3.389800279701117e-21,
+      "time_domain_solver_run": false,
+      "coventor_sdk_called": false,
+      "existing_user_sessions_touched": false
+    },
+    "compact": {
+      "status": "completed",
+      "vertex_count": 846499,
+      "facet_count": 578836,
+      "mat_bytes": 4990102,
+      "fsp_bytes": 39117372,
+      "stages": [
+        {
+          "name": "open_owned_hidden_cad",
+          "seconds": 9.433376600034535
+        },
+        {
+          "name": "disable_redraw",
+          "seconds": 0.0003470999654382467
+        },
+        {
+          "name": "execute_generated_script",
+          "seconds": 27.944641799898818
+        },
+        {
+          "name": "read_vertices",
+          "seconds": 0.05828329990617931
+        },
+        {
+          "name": "save_fsp",
+          "seconds": 2.4931059000082314
+        },
+        {
+          "name": "reopen_fsp",
+          "seconds": 8.69209250016138
+        },
+        {
+          "name": "read_reopened_vertices",
+          "seconds": 0.05963429994881153
+        }
+      ],
+      "cad_peak_private_bytes": 1136185344,
+      "cad_peak_working_set_bytes": 1092980736,
+      "checks": {
+        "initial_vertex_table_exact": true,
+        "all_vertices_retained_on_reopen": true,
+        "reopened_coordinates_match_within_serialization_roundoff": true,
+        "translation_applied_once": true,
+        "group_translation_zero": true,
+        "material_preserved": true,
+        "no_object_rotation": true
+      },
+      "reopened_max_vertex_coordinate_distance_m": 3.389800279701117e-21,
+      "time_domain_solver_run": false,
+      "coventor_sdk_called": false,
+      "existing_user_sessions_touched": false
+    },
+    "independent_vertex_compaction_check": {
+      "checks": {
+        "offsets_exact": true,
+        "translation_byte_exact": true,
+        "all_facet_coordinate_sequences_byte_exact": true,
+        "no_unreferenced_vertices_after_compaction": true
+      },
+      "passed": true,
+      "input_vertices": 1231531,
+      "compact_vertices": 846499,
+      "facets": 578836,
+      "baseline_mat_bytes": 5292505,
+      "compact_mat_bytes": 4990102
+    },
+    "cad_trials_per_variant": 1,
+    "performance_interpretation": "Vertex compaction reduced file sizes and modestly reduced CAD private memory in this trial; import and reopen were slower in the compact trial. No speedup or solver-memory claim."
+  },
+  "one_command_from_real_vdata": {
+    "passed": true,
+    "checks": {
+      "vertices_byte_exact_to_validated_mesh": true,
+      "triangles_byte_exact_to_validated_mesh": true,
+      "translation_byte_exact_to_validated_mesh": true,
+      "all_four_mat_arrays_byte_exact_to_cad_validated_export": true
+    },
+    "source_unchanged": true,
+    "source_sha256": "66da134572910aa2bcf704399ad6d2fd7cdf87154154a7c8196f214609b13292",
+    "decode_reconstruct_archive_seconds": 25.087296599987894,
+    "coplanar_export_seconds": 78.44097859994508,
+    "total_stage_seconds": 103.52827519993298,
+    "files": 9,
+    "mat_bytes": 4990102,
+    "options": [
+      "--storage",
+      "compact",
+      "--planar-optimize",
+      "--coplanar",
+      "--compact-vertices"
+    ],
+    "geometry_reconstruction": "Historical fraction field plus explicitly requested v0.3 axis-plane retriangulation; no QEM.",
+    "cad_validation_link": "All four MAT arrays are byte-identical to the compact export used in the actual CAD trial."
+  },
+  "package_check": {
+    "wheel_built": true,
+    "sdist_built": true,
+    "installed_wheel_synthetic_end_to_end_passed": true
+  },
+  "limits": [
+    "Geometry-preservation checks refer to the reconstructed mesh, not unknown continuous process truth.",
+    "No electromagnetic simulation or 10 nm optical localization acceptance was performed.",
+    "Multi-loop patches safely retain triangles; independent material surfaces remain independent.",
+    "CAD memory is not electromagnetic solver memory.",
+    "CAD serialization readback budgets are numerical checks, not physical accuracy."
+  ]
+}

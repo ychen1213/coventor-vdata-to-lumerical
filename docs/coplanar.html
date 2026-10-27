@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>从大量三角面到共面多边形：理解并使用 v0.4 导入路线</title><link rel="icon" href="data:,"><style>
+:root{--ink:#17333f;--muted:#526b76;--teal:#006c64;--line:#cbdadb}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:#f3f6f5;font:17px/1.85 "Microsoft YaHei",system-ui,sans-serif}header{background:#153f49;color:white;padding:48px max(24px,calc((100vw - 1060px)/2))}header p{color:#d6e6e4}h1{font-size:36px;line-height:1.4}h2{font-size:27px;line-height:1.5;margin-top:0}h3{font-size:21px;margin:30px 0 12px}main{max-width:1110px;margin:auto;padding:26px 24px 60px}section{padding:30px 36px;margin-bottom:23px;background:white;border:1px solid var(--line);border-radius:12px;scroll-margin-top:16px}p{margin:15px 0}a{color:var(--teal)}header a{color:#a5eee0}nav{display:flex;gap:12px 24px;flex-wrap:wrap}code{font:0.9em Consolas,monospace;background:#edf2f4;padding:2px 5px;overflow-wrap:anywhere}pre{font:14px/1.8 Consolas,monospace;background:#18323d;color:#eef8f6;padding:20px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}pre code{background:none;color:inherit;padding:0}.note{padding:15px 20px;border-left:4px solid var(--teal);background:#edf7f4}.caution{border-left-color:#b77b1c;background:#fff6e6}.bridge{border-top:1px solid var(--line);padding-top:18px;color:#365c65}.small,figcaption{color:var(--muted);font-size:14px}.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:15px}td,th{border:1px solid var(--line);padding:12px;text-align:left;vertical-align:top}th{background:#eaf1f1}svg{width:100%;height:auto}ol li{padding-left:4px;margin:12px 0}details{border:1px solid var(--line);border-radius:8px;padding:14px 18px;margin:20px 0}summary{cursor:pointer;font-weight:bold;color:var(--teal)}@media(max-width:650px){body{font-size:16px}main{padding:15px 10px}section{padding:23px 19px}header{padding:30px 22px}h1{font-size:28px}h2{font-size:23px}pre{font-size:12px}}@media print{header{background:white;color:#17333f;padding:20px}header p{color:#526b76}main{padding:0;max-width:none}section{border:0;padding:15px}pre{background:#eee;color:black}}
+</style></head><body>
+<header><p>独立转换器 v0.4.0 · 共面多边形出口 · 2026-10-28</p><h1>STL 已经能生成，为什么还要把三角形合成多边形？</h1><p>沿着同一张表面继续往下走：先理解 CAD 为什么慢，再看如何减少面片，最后用命令生成 Lumerical 可以接收的数组和脚本。</p><p><a href="tutorial.html#store">回到完整教程的保存步骤</a> · <a href="../README.md">安装与快速使用</a></p></header>
+<main>
+<section><nav><a href="#why">从导入瓶颈开始</a><a href="#merge">理解共面合并</a><a href="#arrays">理解数组与 CAD</a><a href="#operate">实际操作</a><a href="#limits">判断结果与限制</a></nav><p>如果还不清楚“体素怎样变成表面”，先阅读<a href="tutorial.html#reconstruct">完整教程的表面重建部分</a>。本页从已经生成的顶点和三角面接手，处理的是同一张现有表面怎样更适合交给 CAD。</p></section>
+<section id="why"><h2>文件变小以后，CAD 为什么还可能很慢？</h2>
+<p>之前一份 AH53 的二进制 STL 有 2,463,058 个三角面，大小约 123.15 MB。STL 对每个三角形分别写三组坐标，相邻三角形虽然共用边，文件中仍然反复记录同一位置。因此把顶点集中放在一张表里、让三角形只记录顶点编号，可以先省下这些重复坐标。</p>
+<p>但是，<strong>省掉重复坐标，没有省掉 CAD 需要处理的 246 万个面片。</strong>同一个大平面可能仍被切成许多细碎三角形。CAD 在建立实体、处理面与面连接、保存和重新打开时，仍需要处理这些面。</p>
+<p>这就是为什么只把 STL 换成压缩 MAT，并不一定彻底解决导入慢。MAT 是一个数组容器：里面可以装三角面，也可以装多边形边界。只有进一步改变面片的表达，才能降低这一部分 CAD 工作量。</p>
+<div class="note"><strong>v0.4 的切入点：</strong>若许多相邻三角形本来就严格处于同一平面，将它们改记成一个具有相同外边界的多边形。已有的起伏、斜面和曲面不因“更平”或“更近”而被吸收到这个平面。</div>
+<p class="bridge">要判断这种操作有没有改变形状，先不要看复杂的 mark。下面只看一个平面矩形，逐项追踪面片、边界和顶点分别发生了什么。</p></section>
+<section id="merge"><h2>同一片平面，可以用六个三角形，也可以用一个多边形记录</h2>
+<figure><svg viewBox="0 0 1000 350" role="img" aria-label="左边六个共面三角形合并为右边一个六边界顶点多边形。中间内部点6不再被面引用，边界点1和4仍保留。"><g fill="#dbefe7" stroke="#357b6f" stroke-width="2"><path d="M70 100H390V260H70Z"/><path d="M610 100H930V260H610Z"/></g><g fill="none" stroke="#729990" stroke-width="2"><path d="M70 100L230 180L230 100 M390 100L230 180L390 260 M230 260L230 180L70 260 M70 100V260"/></g><g fill="#006c64"><circle cx="70" cy="100" r="5"/><circle cx="230" cy="100" r="5"/><circle cx="390" cy="100" r="5"/><circle cx="390" cy="260" r="5"/><circle cx="230" cy="260" r="5"/><circle cx="70" cy="260" r="5"/><circle cx="610" cy="100" r="5"/><circle cx="770" cy="100" r="5"/><circle cx="930" cy="100" r="5"/><circle cx="930" cy="260" r="5"/><circle cx="770" cy="260" r="5"/><circle cx="610" cy="260" r="5"/></g><circle cx="230" cy="180" r="6" fill="#bd6f16"/><g fill="#17333f" font-size="20" text-anchor="middle"><text x="230" y="50">合并前：6 个面，7 个顶点</text><text x="770" y="50">合并后：1 个面，6 个边界点</text><text x="70" y="84">0</text><text x="230" y="84">1</text><text x="390" y="84">2</text><text x="410" y="279">3</text><text x="230" y="290">4</text><text x="70" y="290">5</text><text x="250" y="179">6</text><text x="610" y="84">0</text><text x="770" y="84">1</text><text x="930" y="84">2</text><text x="950" y="279">3</text><text x="770" y="290">4</text><text x="610" y="290">5</text><text x="500" y="182" font-size="36">→</text><text x="770" y="328">点 1、4 虽在直线上，仍保留</text></g></svg><figcaption>这是一个平面片的教学示例，不是完整封闭三维实体。两边矩形覆盖的区域相同，内部画线不同。</figcaption></figure>
+<p>左边原来有六个三角形，围绕内部点 6 连接。合并以后，内部连接线无需再作为 CAD 面的分界；按顺序记录边界点 <code>[0,1,2,3,4,5]</code>，就能表达右边整块区域。</p>
+<p><strong>边界点 1 和 4 仍然保留。</strong>虽然删掉它们看起来还能画出一个矩形，但相邻曲面或其他平面可能也使用这些点和边。如果一边删掉、另一边保留，连接关系就可能失配。本程序保留合并片原来的全部边界顶点及边，只去掉平面内部的面片分界。</p>
+<h3>程序怎样确定“真的能合并”？</h3>
+<p>程序沿共享边寻找同向、连通的候选三角形，然后用现有浮点坐标的精确数值关系判断是否共面。这里的“严格”是<strong>零容差</strong>：没有“离平面不到 0.01 nm 就算平”的设置。浮点数本身是有限二进制数，可以转成精确整数比例来判定；它检查的是当前网格已经记录的坐标，不是推断物理界面是否平坦。</p>
+<p>对通过共面检查的片区，再提取它的有向边界，并检查绕序、拓扑和区域一致性。<strong>单个闭合环可以是凹多边形。</strong>但如果一片平面有孔，它就有外轮廓与孔洞轮廓等多个环；本版在这种情况下保留原来的三角形，不冒险把孔洞填平。不能满足检查的片区也保留原划分或拒绝输出，不使用近似合并补救。</p>
+<h3>“删除未引用顶点”又多做了哪一步？</h3>
+<p>前面的合并只是改变面怎样引用点。教学例子的点 6 可能还留在总顶点表里，尽管没有面再用到它。开启 <code>--compact-vertices</code> 后，程序扫描最终面索引，只保留仍被引用的顶点，再更新编号。<strong>被使用的坐标不移动，也不舍入。</strong>边界上的共线点仍被引用，因此不会被这一步删掉。</p>
+<p>这有别于 QEM：QEM 可以移动、折叠边并改变表面；这里既不将“差不多共面”当作共面，也不为了减少顶点改变边界。它同样有别于旧的 <code>--planar-optimize</code>：旧选项只对严格轴向、凸、单环平面进行重新三角化；新出口可以保留单环凹轮廓并直接向 CAD 交出多边形。</p>
+<p class="bridge">现在得到的是“坐标表＋若干长短不一的边界编号”。接下来要解决的只是怎样保存这些编号，以及怎样让 Lumerical 按同一顺序重新建立面。</p></section>
+<section id="arrays"><h2>MAT 保存边界编号，LSF 把这些编号交给 Lumerical</h2>
+<p>三角形固定使用三个点，可以放进每行三个数的表格。多边形可能用 4 个、6 个、数百个点，不能简单地要求每行一样长。用零填满到最长那一行，可能造成巨大的内存浪费。</p>
+<p>本程序采用一种常见的紧凑记录方式，简称 <strong>CSR</strong>：把所有面的编号顺序接成一条长数组，再用另一条数组标出每个面的起止位置。这个名字也常用于稀疏矩阵；这里它只是一种保存变长列表的方法。</p>
+<pre>教学示例（Python 从 0 编号，仅演示变长列表）：
+面 A 的边界：[0,1,2,3,4,5]   共 6 项
+面 B 的边界：[2,3,4]         共 3 项
+
+连续编号 indices：[0,1,2,3,4,5, 2,3,4]
+边界位置 offsets：[0,6,9]
+
+面 A = indices[0:6]
+面 B = indices[6:9]</pre>
+<p>这两条数组和顶点坐标一起写入 <code>material_NNNN_coplanar.mat</code>。导出时会转换为 Lumerical 的从 1 开始的编号。真实文件还包含整体平移；顶点的局部坐标与平移均使用米，避免把微米数值直接当成米。</p>
+<h3>后缀都是 MAT，内部却不一定是同一种文件</h3>
+<p>这里还遇到一个与几何无关、却会直接阻止导入的兼容性问题：旧的 <code>export-planar</code> 用 SciPy 写 MATLAB v5 文件。本轮本机 Lumerical 2025 R2 的 <code>matlabload</code> 拒绝了测试中的 v5 文件，无论是否压缩；但同机通过 Lumerical 内置 <code>matlabsave</code> 保存的 HDF5 文件可以读取。仅仅让 Python 成功回读，不能证明 CAD 也会接收。</p>
+<p>因此，新 <code>export-coplanar</code> 改用 <strong>MATLAB v7.3 格式，其内部基于 HDF5</strong>，由开源 <code>hdf5storage</code> 和 <code>h5py</code> 写出。无需 MATLAB 安装、MATLAB SDK 或 Coventor SDK。它仍使用 <code>.mat</code> 后缀，但文件内部的组织方式不同，不能把旧 v5 文件改个名字就当作 v7.3。</p>
+<p>新版依赖已加入普通安装列表；更新代码后重新执行 <code>python -m pip install -r requirements.txt</code>。本轮已经实际执行新生成的 LSF，验证这份 AH53 的普通版与清理版都可以建立 CAD 实体、保存并重新打开；具体范围见<a href="#current-validation">本轮记录</a>。其他输入与软件版本仍应执行相同的交接检查。</p>
+<div class="table"><table><thead><tr><th>真实 MAT 变量</th><th>内容</th></tr></thead><tbody><tr><td><code>vdata_poly_vertices</code></td><td>N×3 的局部米制顶点坐标</td></tr><tr><td><code>vdata_poly_flat</code></td><td>按顺序连接的边界顶点编号，从 1 开始，double 保存整数</td></tr><tr><td><code>vdata_poly_offsets</code></td><td>每个面在 flat 中的起始位置，从 1 开始；末尾是 length(flat)+1 的终止位置</td></tr><tr><td><code>vdata_poly_translation_m</code></td><td>加到局部坐标上的整体位移，单位米</td></tr></tbody></table></div>
+<details><summary>如果想在 Python 中直接看到新 MAT 的数组</summary><p>使用与文件格式匹配的读取器。下面只读取数组，不调用任何商业程序：</p><pre>import hdf5storage
+import numpy as np
+
+data = hdf5storage.loadmat("material_0002_coplanar.mat")
+vertices = data["vdata_poly_vertices"]
+flat = data["vdata_poly_flat"].ravel().astype(np.int64) - 1
+offsets = data["vdata_poly_offsets"].ravel().astype(np.int64) - 1
+first_loop = flat[offsets[0]:offsets[1]]
+print("顶点表：", vertices.shape)
+print("面片数：", len(offsets) - 1)
+print("第一个面的 Python 顶点编号：", first_loop)</pre><p>上面减 1 是把 Lumerical 的 1 基编号还原为 Python 的 0 基编号，不改变坐标。这里不要使用旧 SciPy MAT v5 的 <code>scipy.io.loadmat</code> 示例。</p></details>
+<p>配套 <code>import_lumerical_coplanar.lsf</code> 先用 <code>matlabload</code> 读取数值数组，再按 offsets 把每一段编号取出来，构造 Lumerical 需要的嵌套 <code>cell</code>。每个面的第一层 cell 里放一条单环边界，边界编号使用行向量。最后调用 <code>addplanarsolid(vertices, facets)</code>，并设置材料、名称和整体位置。</p>
+<pre>逻辑示意；变量名、范围检查和材料设置以生成脚本为准：
+matlabload(".../material_0002_coplanar.mat");
+facets = cell(number_of_faces);
+for (i=1:number_of_faces) {
+  facets{i} = cell(1);
+  facets{i}{1} = transpose(indices(first(i):last(i)));
+}
+addplanarsolid(vertices, facets);</pre>
+<p>这条路线不先生成 STL。它也不是把体素数组装进 MAT：MAT 里仍然是表面几何，只是面不再全部被限制为三角形。Planar Solid 的 cell 接口见 <a href="https://optics.ansys.com/hc/en-us/articles/360034924113-addplanarsolid-Script-command">Ansys 官方命令说明</a>。</p>
+<div class="note caution"><strong>不要为了查看面片而对整个大对象执行 <code>get("facets")</code>。</strong>已有版本的读取接口可能将变长面展开为按最长面填充的庞大数组。脚本通过构造函数交入 cell，验证时应优先读取顶点、位置、材料并检查截面；不能因为写入采用紧凑数组，就假定所有读取接口也保持同样紧凑。</div>
+<p class="bridge">理解了 MAT 和 LSF 的分工，实际操作只剩两个选择：对已有转换目录补这个出口，或者从 VDATA 开始一次完成两段工作。</p></section>
+<section id="operate"><h2>先复用已有网格，再按需要从头转换</h2>
+<p>下面使用 PowerShell，并假设已按 <a href="../README.md">README</a> 在源码目录建立普通 Python 环境。转换本身不调用 Coventor SDK、安装程序、许可证服务或 Lumerical。只有最后手工执行生成脚本时，才需要本机 Lumerical。</p>
+<pre>$toolPython = ".\.venv\Scripts\python.exe"
+$outputDir = ".\outputs\sample_compact"</pre>
+<h3>已有本程序的转换目录时，直接补多边形出口</h3>
+<p>把 <code>$outputDir</code> 指向包含 <code>conversion_manifest.json</code> 和已记录网格的目录。命令会检查清单和网格哈希，读取已有网格，不再解压原始 VDATA、不重新推断表面：</p>
+<pre>&amp; $toolPython run.py export-coplanar $outputDir --min-faces 2</pre>
+<p><code>--min-faces 2</code> 表示至少两个合格三角形才考虑合成一个面，默认就是 2；它不是误差容差。先生成保留原顶点表的普通版，下一步再生成可以并排比较的顶点清理版。源 VMESH/NPZ/STL 不会因导出被替换。</p>
+<p>若从一个基础的单实体 <code>compact</code> 目录接手，新增的交接文件是：</p>
+<pre>sample_compact/
+  meshes/
+    material_0002_coplanar.mat   顶点＋变长多边形边界＋平移
+  import_lumerical_coplanar.lsf  为全部导出材料创建 CAD 对象
+  coplanar_report.json           合并统计、检查和输出记录
+
+  conversion_manifest.json      原有清单同步更新
+  ...                           原始记录与三角网格继续保留</pre>
+<p>本例多 3 个文件，基础 6 文件目录会成为 9 文件。多材料时每个实体有自己的 MAT，脚本和报告共用；已经导出 STL 或其他 MAT 的目录，文件数会更多。以实际清单为准，不要把 9 当成任意输入的固定文件数。</p>
+<h3>接着生成清理版，比较相同表面的两套输出</h3>
+<pre>&amp; $toolPython run.py export-coplanar $outputDir `
+  --min-faces 2 --compact-vertices</pre>
+<p>这次显式删除未引用顶点。新文件为 <code>meshes/material_0002_coplanar_compact.mat</code>、<code>import_lumerical_coplanar_compact.lsf</code> 和 <code>coplanar_compact_report.json</code>，普通版不被覆盖。刚才的单材料例子此时共 12 文件。若只执行清理版而未执行普通版，则从基础 6 文件变为 9 文件。</p>
+<h3>还没有转换目录时，从 VDATA 一次生成</h3>
+<pre>&amp; $toolPython examples/make_sample.py ".\outputs\sample.vdata"
+
+&amp; $toolPython run.py convert ".\outputs\sample.vdata" `
+  --output ".\outputs\sample_coplanar" --storage compact `
+  --coplanar --coplanar-min-faces 2 --compact-vertices</pre>
+<p>第一行仅生成演练用的人工 VDATA，不进行刻蚀工艺仿真。第二行先采用所选重建方法生成三角网格，再执行刚才的共面出口。实际数据换成自己的输入路径，新输出目录必须不存在或为空。<strong>是否先做旧平面重三角化、是否做 QEM，仍由各自参数决定；<code>--coplanar</code> 不隐含这些操作。</strong></p>
+<h3>修正材料映射，然后在 Lumerical 执行正确的脚本</h3>
+<p>检查 <code>material_map.json</code>，名称必须与目标电脑的光学材料库完全一致。未知材料需要你指定，不可只看几何成功就默认材料也正确。例如：</p>
+<pre>{"materials": {"id:2": "Si (Silicon) - Palik"}}</pre>
+<p>更新材料映射或移动整个输出目录后，重新生成该路线的脚本和记录。沿用相同的合并与顶点选项，便于复现：</p>
+<pre>&amp; $toolPython run.py export-coplanar $outputDir `
+  --material-map "$outputDir\material_map.json" `
+  --min-faces 2 --compact-vertices</pre>
+<ol><li>打开 Lumerical FDTD 的空白工程。大型几何在已测试的 2025 R2 中使用 Classic 视口；其他版本先在小样上验证。</li><li>在脚本编辑器中打开并执行所选版本的脚本：普通版是 <code>import_lumerical_coplanar.lsf</code>，清理版是 <code>import_lumerical_coplanar_compact.lsf</code>。两个版本应在各自空白工程中比较，避免将同一几何叠加两遍。</li><li>检查对象数量、材料、坐标和几个侧面／水平截面；保存 FSP，重新打开，检查对象仍在正确位置。</li><li>几何交接完成后，才继续设置 FDTD 区域、光源、边界、网格和监视器。这里生成的文件和脚本不执行电磁求解。</li></ol>
+<p class="bridge">操作完成后应先看报告确认“哪里少了面、哪里保留原面”。下面把这些数字能说明什么、不能说明什么说清楚，避免将 CAD 优化当成重建精度的提高。</p></section>
+<section id="limits"><h2>怎样判断这次优化有效，以及它没有解决什么</h2>
+<p><code>coplanar_report.json</code> 用于检查每种材料的输入三角面数、输出面片数、顶点保留／清理数量以及几何检查。面数下降小不一定是失败：曲面上没有严格共面的大片区域，或平面有多环孔洞时，安全回退本来就会保留更多三角形。</p>
+<div id="current-validation" class="note"><strong>本轮正式程序已完成的验证：</strong>在本机 Lumerical 2025 R2 中，实际执行 v0.4 新生成的普通版与清理版 LSF，对复用已有完整 AH53 网格的两套输出均完成导入、保存 FSP、关闭／重新打开和坐标、材料、位置、旋转检查。另从原始完整 VDATA 实际完成一条 <code>convert</code> 命令，并将其输出与已通过 CAD 的来源逐字节核对。没有运行电磁求解。公开摘要见<a href="evidence/v040_validation.json">v0.4 验证记录</a>。</div>
+<p>两套新输出都将原来的 2,463,058 个三角面表达为 <strong>578,836 个 CAD 面片</strong>，其中 191,544 个是合并后多边形、387,292 个保留为三角形，减少约 76.50%。普通版保留全部顶点；清理版删除 385,032 个未引用顶点。下表全部为本轮正式命令新文件的测量；MB、GB 均为十进制。</p>
+<div class="table"><table><thead><tr><th>本轮同一 AH53 的指标</th><th>共面普通版</th><th>共面＋顶点清理版</th></tr></thead><tbody><tr><td>CAD 面片</td><td>578,836</td><td>578,836</td></tr><tr><td>顶点</td><td>1,231,531</td><td>846,499</td></tr><tr><td>v7.3 / HDF5 MAT</td><td>5.293 MB</td><td>4.990 MB</td></tr><tr><td>保存的 FSP</td><td>48.358 MB</td><td>39.117 MB</td></tr><tr><td>CAD 峰值私有内存</td><td>1.185 GB</td><td>1.136 GB</td></tr><tr><td>执行实际导入 LSF</td><td>24.980 秒</td><td>27.945 秒</td></tr><tr><td>保存 FSP</td><td>2.563 秒</td><td>2.493 秒</td></tr><tr><td>重新打开 FSP</td><td>7.823 秒</td><td>8.692 秒</td></tr></tbody></table></div>
+<p>清理版相对于普通版，MAT 约减小 5.71%，FSP 约减小 19.11%，本次 CAD 峰值私有内存约下降 4.10%。<strong>不能据此宣称清理版导入更快：</strong>每版只测一次，清理版本次执行 LSF 和重新打开反而更慢。已得到的主要收益是删除无用途坐标、缩小文件以及本次 CAD 内存小幅下降。</p>
+<p>独立检查比较了全部 <strong>2,850,666 个边界索引所指向的坐标序列</strong>：清理前后逐字节相同，offsets 与整体平移完全一致。因此这里不是只比较包围盒或总表面积。两版初次进入 CAD 的顶点表也均逐字节一致；保存重开后的最大坐标舍入约为 3.39×10<sup>−21</sup> m，材料、对象位置、零旋转与组坐标均检查通过。这是序列化数值检查，不是物理工艺精度。</p>
+<p>不依赖商业软件的完整回归为 <strong>242 个测试及 106 个子测试通过</strong>。测试与上述真实 CAD 记录是不同层次的证据；它们不替代电磁网格、光学收敛或定位精度验证。</p>
+<h3>从原始完整 VDATA 开始的一条命令，也已经实际走通</h3>
+<p>前表先复用已有网格，以便把 CAD 导入与顶点清理独立检查。随后又用同一真实 AH53 原始文件从头运行：</p>
+<pre>&amp; $toolPython run.py convert `
+  "D:\CoventorProjects\AH53_Si_300nm_Nonideal\AH53_Si_300nm_Nonideal.vdata" `
+  --output ".\outputs\ah53_coplanar_compact_checked" --storage compact `
+  --planar-optimize --coplanar --compact-vertices</pre>
+<p>注意这里<strong>明确加了旧的 <code>--planar-optimize</code></strong>。它先重新三角化合格的轴向凸平面，再由新 <code>--coplanar</code> 将合格片区表达成多边形；后者不隐含前者。运行自己的案例时，应选全新的输出目录，并根据需要选择这两项独立步骤。</p>
+<p>这次解码、重建、旧平面优化和归档共 25.0873 秒，共面出口 78.4410 秒，<strong>阶段合计 103.5283 秒</strong>，不含 CAD 导入和电磁求解。生成 9 个文件，清理版 MAT 为 4,990,102 字节，原始 VDATA 的哈希不变。</p>
+<p>独立检查确认：这次新 VMESH 的顶点、面索引及整体平移，与前面真实 CAD 验证所用的来源逐字节一致；新 MAT 的四个数组也全部逐字节一致。因此没有为了相同几何再重复运行一次 CAD。这样分别验证了“从 VDATA 到交接文件”和“正式 LSF 在 CAD 中接收并保存”的两段，并用数组一致性把两段连起来。</p>
+<details><summary>对照历史实验：为什么当初决定正式集成这条路线</summary>
+<h3>已有实验给出了值得继续集成的依据</h3>
+<p>下表为独立实验脚本对一份 AH53 的历史测量，单位 MB、GB 均为十进制。它比较的是已经重建并做过旧平面优化的同一张网格，不是任意 VDATA 的保证，也不是本轮正式命令的新测量。</p>
+<div class="table"><table><thead><tr><th>CAD 阶段指标</th><th>索引三角面路线</th><th>共面多边形路线</th></tr></thead><tbody><tr><td>面片数</td><td>2,463,058</td><td>578,836</td></tr><tr><td>几何准备与建立</td><td>约 50.6 秒</td><td>约 25.0 秒</td></tr><tr><td>保存的 FSP</td><td>约 89.1 MB</td><td>约 48.4 MB</td></tr><tr><td>CAD 峰值私有内存</td><td>约 2.70 GB</td><td>约 1.17 GB</td></tr></tbody></table></div>
+<p>首次共面识别、数据导出和完整审计另需时间，不能从几何建立阶段的减半推断整个首次转换也减半。历史数据保留了 385,032 个未引用顶点；上面本轮的普通版／清理版对比已另外测量这部分收益。</p>
+</details>
+<h3>精度的参照始终是“已有重建表面”</h3>
+<p>共面合并的几何检查参照输入三角网格；顶点清理参照被实际使用的原坐标。它们不从 VDATA 恢复新的界面信息，不修复材料占比推断表面时的误差，也不能证明与未知的真实刻蚀界面一致。多材料仍沿用原来的独立重建结果；共面出口不自动建立共享界面、包含关系或 Mesh Order。</p>
+<p>FSP 保存／重新读取可能有软件自身的浮点舍入；因此要把“输入数组坐标保持”和“商业软件往返数值检查”分开记录。检查界面与材料是否进入电磁求解器，还需要网格和光学验证。</p>
+<p>本出口使用 MATLAB v7.3 / HDF5，实际可处理规模仍取决于可用内存、压缩和 CAD 对象开销；换一种容器并不是无限内存解决方案。输入必须是本转换器已经记录、闭合且绕序一致的材料表面；未知清单、损坏哈希、边非流形（共享边不恰为两面）或退化输入会被拒绝；本程序未检查全局顶点流形性。支持的 VDATA 编码范围也仍沿用读取器限制。</p>
+<p><strong>CAD 内存下降不等于 FDTD 求解器内存下降。</strong>前者与几何对象和面片管理有关；后者主要受计算区域、网格和场／材料数组影响。在相同求解区域和电磁网格下，不能将表中 CAD 的内存比例直接套到求解器。</p>
+<p class="bridge">这条升级的落点是明确的：复用同一张表面，减少 CAD 面片和无用途坐标，让文件交接与工程操作更轻。完成这一步后，再用一致的光学设置评价求解资源，才能知道后续真正的计算瓶颈在哪里。</p>
+</section></main></body></html>

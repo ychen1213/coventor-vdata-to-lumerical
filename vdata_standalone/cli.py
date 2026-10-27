@@ -121,7 +121,7 @@ def generate_lsf(objects, folder):
 
 def _versions():
     result = {"python": sys.version.split()[0], "converter": __version__}
-    for name in ("numpy", "scikit-image", "fast-simplification", "trimesh", "scipy", "rtree"):
+    for name in ("numpy", "scikit-image", "fast-simplification", "trimesh", "scipy", "rtree", "shapely", "hdf5storage", "h5py"):
         try:
             result[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -438,6 +438,7 @@ def convert(args):
         write_json(manifest_path, manifest)
     print(json.dumps({"status": manifest["status"], "output": str(out), "materials_exported": len(manifest["objects"]),
                       "elapsed_seconds": manifest["elapsed_seconds"], "source_unchanged": manifest["source_unchanged"]}, ensure_ascii=False, indent=2), flush=True)
+    args.completed_output = str(out)
     return 0
 
 
@@ -456,6 +457,11 @@ def build_parser():
     planar = sub.add_parser("export-planar", help="Export indexed MAT and addplanarsolid script, preserving all triangles")
     planar.add_argument("folder")
     planar.add_argument("--material-map")
+    coplanar = sub.add_parser("export-coplanar", help="Merge exact coplanar patches and export numeric polygon MAT plus a cell-based Planar Solid script")
+    coplanar.add_argument("folder", help="Existing completed standalone conversion folder")
+    coplanar.add_argument("--material-map")
+    coplanar.add_argument("--min-faces", type=int, default=2, help="Minimum connected patch triangle count; default 2")
+    coplanar.add_argument("--compact-vertices", action="store_true", help="Also remove unreferenced vertices; write separate *_coplanar_compact outputs")
     optimize = sub.add_parser("optimize-mesh", help="Retriangulate eligible exact planar patches in one existing closed mesh; no VDATA decoding")
     optimize.add_argument("input", help="Existing .vmesh or indexed .npz mesh")
     optimize.add_argument("--output", required=True, help="New .vmesh path; never overwrite")
@@ -480,6 +486,12 @@ def build_parser():
         p.add_argument("--surface", choices=("fraction", "vof", "plane"), default="fraction",
                        help="fraction: historical 0.5 isosurface; vof: experimental PLIC-guided field; plane: experimental saved planes in local voxel-corner convention")
         if name == "convert":
+            p.add_argument("--coplanar", action="store_true",
+                           help="Also export exact coplanar polygon MAT/LSF after reconstruction")
+            p.add_argument("--coplanar-min-faces", type=int, default=2,
+                           help="Minimum patch triangle count for --coplanar; default 2")
+            p.add_argument("--compact-vertices", action="store_true",
+                           help="Requires --coplanar; remove unreferenced vertices in the polygon export only")
             p.add_argument("--planar-optimize", action="store_true",
                            help="Retriangulate eligible exact axis-aligned convex planar patches; lock all original patch boundary vertices")
             p.add_argument("--planar-min-faces", type=int, default=128,
@@ -530,6 +542,9 @@ def main(argv=None):
             return 0
         if args.command == "export-planar":
             return export_planar(args)
+        if args.command == "export-coplanar":
+            from .coplanar_export import export_coplanar
+            return export_coplanar(args)
         if args.command in {"lsf", "export-stl"}:
             folder = Path(args.folder).expanduser().resolve()
             path = folder / "conversion_manifest.json"
@@ -625,7 +640,19 @@ def main(argv=None):
             raise ValueError("--max-raw-gib must be finite and positive")
         if args.command == "decode" and (args.skip_voxels or args.reduction):
             raise ValueError("decode requires voxel output and does not perform QEM")
-        return convert(args)
+        if args.command == "convert" and args.coplanar_min_faces < 2:
+            raise ValueError("Coplanar minimum face count must be at least 2")
+        if args.command == "convert" and args.compact_vertices and not args.coplanar:
+            raise ValueError("--compact-vertices requires --coplanar")
+        result = convert(args)
+        if args.command == "convert" and args.coplanar:
+            from .coplanar_export import export_coplanar
+            # Conversion may choose a timestamped destination. Read that path
+            # from the returned conversion context instead of guessing it.
+            return export_coplanar(argparse.Namespace(folder=args.completed_output,
+                material_map=args.material_map, min_faces=args.coplanar_min_faces,
+                compact_vertices=args.compact_vertices))
+        return result
     except (ValueError, RuntimeError, OSError, ImportError) as exc:
         print("Conversion failed: " + str(exc), file=sys.stderr)
         return 2

@@ -9,13 +9,14 @@ main{max-width:1120px}section{padding:36px 42px}h2{font-size:28px}h3{margin-top:
 @media(max-width:650px){section{padding:24px 19px}.route{grid-template-columns:1fr 1fr;gap:9px}.route b{font-size:16px}.route button{padding:11px}.route button.active{padding:10px}.toc-groups,.compare{grid-template-columns:1fr}.lead{font-size:18px}h2{font-size:24px}.stage-panel{min-height:0}.toc-groups{gap:7px}}
 @media print{.route button{background:white}.stage-panel{min-height:0}details{break-inside:auto}.bridge{color:#172c38}}
 </style></head><body>
-<header><div class="smallcaps">独立转换器 v0.3 · 完整过程与正式升级 · 2026-10-27</div>
+<header><div class="smallcaps">独立转换器 v0.4 · 完整过程与共面多边形出口 · 2026-10-28</div>
 <h1>这份 VDATA 是怎样<br>一步步变成 FDTD 几何的？</h1>
 <p class="lead">先看懂程序原本做了什么，再看懂这次到底改了哪一步。</p>
 <p>全文使用同一个 AH53 硅标记，以及同一个“20 nm 格子里有 25% 硅”的小例子。先顺着文件进入程序、材料被读出、表面被建立、几何被保存的顺序讲；理解完整过程以后，再解释精度和大小这两项改进，最后亲手走通一次。</p></header>
 <main>
 <section id="contents"><h2>这次按三层关系阅读</h2>
 <p class="evidence-note"><strong>v0.3已正式接入流式裁剪，并新增可选平面优化与活跃块提取。</strong>正文先讲稳定的完整转换主线；新增参数、适用条件与真实时间/内存/文件大小对照，请看<a href="upgrade_v030.html">v0.3升级说明</a>。默认重建表面仍与此前一致，平面重三角化需显式加<code>--planar-optimize</code>。</p>
+<p class="evidence-note"><strong>沿着第③步“保存几何”继续，v0.4新增共面多边形出口。</strong>先将同一平面里的三角形改记成多边形，减少 CAD 面片；再可选删除没有面使用的顶点，不移动被使用的坐标。若你正遇到“123 MB STL导入慢”，可在理解本页的顶点／面表之后阅读<a href="coplanar.html">从 STL 瓶颈到多边形 MAT、LSF 和实际操作</a>，它接续本页的同一条路线。</p>
 <p class="evidence-note">本页随公共仓库 <a href="https://github.com/ychen1213/coventor-vdata-to-lumerical">coventor-vdata-to-lumerical</a> 一起发布，可下载后离线打开。文中的 D:\CoventorProjects 路径是作者本机 AH53 案例；原始模型、商业软件和验证环境不包含在源码中。首次下载可先照 <a href="../README.md">README</a> 建立本地 .venv，并使用第7部分的人工小样走通转换。真实案例中的裁剪坐标只适用于对应 AH53 输入。</p>
 <div class="toc-groups"><div><h3>先理解原来的完整过程</h3><nav><a href="#purpose">1. 已有刻蚀结果，程序还要做什么</a><a href="#read">2. 先把文件还原成材料记录</a><a href="#reconstruct">3. 再从材料记录建立三角表面</a></nav></div>
 <div><h3>再回到具体步骤理解改进</h3><nav><a href="#accuracy">4. 精度改进：改变表面的位置推断</a><a href="#store">5. 大小改进：改变同一表面的保存方式</a><a href="#results">6. 按这两项目标分别检查效果</a></nav></div>
@@ -253,9 +254,10 @@ set("material", "Si (Silicon) - Palik");</pre>
 <p>这里“无损”的参照对象是重建后的数组，不是不可见的真实刻蚀表面。即使把一个位置偏了 2 nm 的网格精确保存，解压后它仍然偏 2 nm。存储无损不会消除上一阶段的重建误差。</p>
 <h3>小文件怎样交给接收软件？有两种出口</h3>
 <p>自研程序可以直接使用本工具的读取器读 VMESH。但 Lumerical 不会因为我们给文件起了这个后缀就自动支持它。因此，紧凑归档还需要转换成接收端认可的输入。</p>
-<div class="compare"><div><h3>出口一：按需展开 STL</h3><p><code>export-stl</code> 读取 VMESH，恢复原顶点和面，写出传统 STL，再生成相应导入脚本。</p><p>优点是延续原 STL 工作流；代价是导入之前，大型 STL 文件会重新出现。</p></div><div><h3>出口二：直接给顶点和面表</h3><p><code>export-planar</code> 把这些表写成压缩 MAT，生成脚本，让 Lumerical 按顶点和面表创建 Planar Solid。</p><p>它省去重复坐标的 STL 中间文件。仍保留所有三角面，不会自动降低求解网格规模。</p></div></div>
+<div class="compare"><div><h3>出口一：按需展开 STL</h3><p><code>export-stl</code> 读取 VMESH，恢复原顶点和面，写出传统 STL，再生成相应导入脚本。</p><p>优点是延续原 STL 工作流；代价是导入之前，大型 STL 文件会重新出现。</p></div><div><h3>出口二：直接给顶点和面表</h3><p>索引数组可以避免 STL 的重复坐标。旧 <code>export-planar</code> 保留全部三角面，使用 SciPy MAT v5；新 <code>export-coplanar</code> 还将合格平面改成多边形，使用 v7.3 / HDF5。</p><p>本机2025 R2实际测试拒绝了旧 v5 文件，所以本轮操作优先采用新出口。两者都不自动降低求解网格规模。</p></div></div>
 <p>MAT 是保存数组的文件格式；LSF 是告诉 Lumerical 执行哪些操作的脚本文本。这里的 MAT 保存三角网格的顶点和面编号，<strong>不是前面尝试过的庞大三维二值体素掩模 MAT</strong>。后缀相同，内容和用途可以完全不同。</p>
-<p>Planar Solid 的矩阵接口有官方依据，离线数据回读也已验证；这次还没有在 Lumerical 中实际执行新生成的 MAT/LSF。所以它是一个已准备好的导入路线，不能把生成文件等同于已经完成软件导入或电磁仿真。<a href="https://optics.ansys.com/hc/en-us/articles/360034924113-addplanarsolid-Script-command">Ansys 接口说明</a></p>
+<p>Planar Solid 的接口有官方依据，但“Python 能回读 MAT”与“Lumerical 能读取同一文件”还隔着实际格式兼容性。v0.2、v0.3记录当时只验证了旧 MAT 的离线数组。本轮测试发现 Lumerical 2025 R2 的 <code>matlabload</code> 拒绝测试中的压缩／非压缩 SciPy v5，而可以读取它自身保存的 HDF5 文件；新共面出口因此改用开源 <code>hdf5storage</code> / <code>h5py</code> 写 MATLAB v7.3，无需安装 MATLAB。新命令的完整 CAD 验证范围见<a href="coplanar.html#limits">对应记录</a>。这也说明同为 <code>.mat</code> 后缀，内部格式未必相同。<a href="https://optics.ansys.com/hc/en-us/articles/360034924113-addplanarsolid-Script-command">Ansys 接口说明</a></p>
+<div class="note"><h3>若保存已经很小，导入仍然慢，接下来该改什么？</h3><p>上面的共享坐标表省去了重复记录，但每个三角形仍然是一个 CAD 面。如果同一个平面被分成大量三角形，下一步就可以把严格共面的连续片区改成多边形，同时保留所有边界点。它改变的是已经生成表面的表达，不重新推断体素界面。</p><p>v0.4提供<code>export-coplanar</code>与可选<code>--compact-vertices</code>，对应“减少面片”与“清理未引用顶点”两步。含孔多环区域会保留原三角形；适用比例因结构而异。完整推导、变长编号数组怎样交给<code>addplanarsolid</code>、两套输出如何操作，请接着读<a href="coplanar.html">共面路线教程</a>。</p></div>
 <p class="bridge">到这里，两项改进的位置已经明确了：plane/vof 改“怎样建立表面”；compact 改“怎样保存表面”。它们可以独立组合。接下来分别看几何误差和存储大小，才不会把“文件小了”误读为“表面更准了”。</p></section>
 
 <section id="results"><div class="stage">验证 · 每个数字对应前面的一项明确改动</div><h2>6. 怎样知道改进有效，而不只是看起来更好？</h2>
@@ -272,13 +274,14 @@ set("material", "Si (Silicon) - Palik");</pre>
 <p>这些结果支持保留不同方法作对照，而不支持“新版算法对任意 VDATA 都全面更准确”。它们还没有经过 FDTD 电磁仿真和最终对准位置读出，因此不能直接写成“已经保证 10 nm 定位精度”。</p>
 <h3>接着固定表面，单独检查存储优化</h3>
 <p>下面换成完整 AH53 的原 fraction 网格，保持 2,492,066 个顶点和 4,984,128 个三角面不变。比较的只是在磁盘上怎样记录它，而不是重新建立另一张表面。</p>
-<div class="table"><table><thead><tr><th>同一未减面网格的保存方式</th><th>文件大小，十进制 MB</th><th>含义</th></tr></thead><tbody><tr><td>二进制 STL</td><td>249.21</td><td>每个三角面重复写坐标，写出为 float32</td></tr><tr><td>原索引 NPZ</td><td>28.55</td><td>压缩顶点和面数组，是无损对照基准</td></tr><tr><td>新 compact / VMESH</td><td><strong>1.91</strong></td><td>更适合网格规律的可逆编码，恢复原数组每一位</td></tr><tr><td>Planar Solid MAT</td><td>21.03</td><td>接收端可用的顶点和面表，不展开 STL</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>同一未减面网格的保存方式</th><th>文件大小，十进制 MB</th><th>含义</th></tr></thead><tbody><tr><td>二进制 STL</td><td>249.21</td><td>每个三角面重复写坐标，写出为 float32</td></tr><tr><td>原索引 NPZ</td><td>28.55</td><td>压缩顶点和面数组，是无损对照基准</td></tr><tr><td>新 compact / VMESH</td><td><strong>1.91</strong></td><td>更适合网格规律的可逆编码，恢复原数组每一位</td></tr><tr><td>历史三角 MAT v5</td><td>21.03</td><td>顶点和面表归档；本机2025 R2不能直接读取，勿作为当前导入推荐</td></tr></tbody></table></div>
 <p>对二进制 STL，字节数固定为 <code>84+50×三角面数</code>。面数不变，仍是原生 STL，就不能把这个记录结构缩到 1.91 MB。这里缩小的是另一种保存相同网格的归档。VMESH 的无损验证是与原索引数组逐字节比较，并不是声称恢复了 STL 文件头和每个原 STL 字节。</p>
 <p>1.91 MB 只指几何归档。基础输出还包含约 1.32 MB 的原始材料压缩数组和其他说明文件；如果再导出 MAT，整个文件夹还会增加约 21.03 MB。不同网格的压缩规律也不同：完整 vof 网格虽然面数相同，归档约为 3.48 MB，不能把 1.91 MB 当作任意模型的固定大小。</p>
 <h3>最后分清三种“内存/大小”</h3>
 <p>文件保存体积是磁盘上的字节数；转换峰值内存是建立占比场、三角面和压缩块时暂时占用的内存；FDTD 求解内存则用于电磁场、材料系数、吸收边界和色散状态。它们属于不同阶段。</p>
 <p>本机完整 fraction→compact 转换约 14.92 秒，峰值进程内存约 863 MB；vof→compact 约 35.97 秒，峰值约 844 MB。这些是转换资源，不是求解时间或电磁内存。相同几何、相同 FDTD 网格与更新算法，不会因为输入文件缩小，就少保存相同比例的场数组。</p>
 <p>上述v0.2基准测试为123项及40个子测试通过。v0.3正式回归为187项及106个子测试通过，完整记录见<a href="evidence/v030_validation.json">升级验证记录</a>。默认流式裁剪后的原始记录和表面数组与原路径逐字节一致；平面优化另检查闭合、绕向、面积、体积和边界。运行验证拦截厂商模块、安装目录和子进程调用，确认转换没有调用 Coventor SDK。</p>
+<p>v0.4在此基础上完成242个测试及106个子测试。正式程序复用已有完整AH53网格生成的两版共面LSF，已在本机2025 R2中实际执行并完成保存／重开检查；另从原始完整VDATA实际执行一条<code>convert</code>命令，显式加入<code>--storage compact --planar-optimize --coplanar --compact-vertices</code>，阶段合计约103.53秒、不含CAD，输出9文件。其VMESH顶点／面／平移及MAT四数组逐字节等于已完成CAD验证的来源，因此未重复运行相同几何CAD。旧平面优化在本次命令中是显式选项，不是共面出口隐含。<a href="coplanar.html#current-validation">新教程实测表</a>和<a href="evidence/v040_validation.json">新验证摘要</a>把它与历史数字分开。本轮未运行电磁求解。</p>
 <p class="bridge">现在你已经知道每个选项改变哪一步，也知道数据证明了什么。下一部分不再同时创建许多实验分支，而是先使用一个小范围和一个输出目录，把“检查输入 → 转换 → 准备导入 → 手工检查”完整走通。</p></section>
 
 <section id="use"><div class="stage">实际操作 · 一条主路线，只有一个输出目录</div><h2>7. 跟着同一份输入，完整做一次转换</h2>
@@ -291,9 +294,8 @@ set("material", "Si (Silicon) - Palik");</pre>
 .\.venv\Scripts\python.exe examples/make_sample.py outputs/sample.vdata
 .\.venv\Scripts\python.exe run.py inspect outputs/sample.vdata
 .\.venv\Scripts\python.exe run.py convert outputs/sample.vdata --output outputs/sample_compact --storage compact
-.\.venv\Scripts\python.exe run.py export-stl outputs/sample_compact
-.\.venv\Scripts\python.exe run.py export-planar outputs/sample_compact</pre>
-<p>这组命令生成原始记录归档、紧凑网格，再导出STL和MAT/LSF；不会启动商业软件。生成的LSF仍需要你手动在Lumerical中运行。再次练习时换一个新的输出目录。真实数据使用自己的输入路径；不要把下面AH53专用裁剪范围套到人工小样上。</p>
+.\.venv\Scripts\python.exe run.py export-coplanar outputs/sample_compact</pre>
+<p>这组命令生成原始记录归档、紧凑网格，再导出共面多边形 v7.3 MAT/LSF 和报告；不会启动商业软件。生成的LSF仍需要你手动在Lumerical中运行。再次练习时换一个新的输出目录。真实数据使用自己的输入路径；不要把下面AH53专用裁剪范围套到人工小样上。</p>
 <h3>A. 回到本机AH53案例，先指定输入、程序和唯一的输出目录</h3>
 <pre>$toolPython = "D:\CoventorProjects\VDATA_Standalone_Validation\.venv\Scripts\python.exe"
 $toolEntry = "D:\CoventorProjects\VDATA_Standalone\run.py"
@@ -321,19 +323,23 @@ $outputDir = "D:\CoventorProjects\My_First_AH53_Conversion"
   import_lumerical.lsf         此时只是提示先恢复STL，不能直接导入VMESH
   conversion_manifest.json    本次处理方法、体积、检查和文件清单</pre>
 <p>此时已经有表面，只是它被保存在 VMESH 内。下一步不会再读 VDATA，也不会重新推断表面；它读取这份已经生成的几何归档，准备接收软件可用的文件。</p>
-<h3>C. 在同一个目录中生成 MAT 和导入脚本</h3>
-<pre>&amp; $toolPython $toolEntry export-planar $outputDir</pre>
-<p>这条命令增加两个文件：<code>meshes/material_0002_planar.mat</code> 和 <code>import_lumerical_planar.lsf</code>。此时目录中共 8 个文件。MAT 是实际顶点和面数据，LSF 则告诉 Lumerical 如何加载它并设置材料及位置。</p>
-<p><strong>这一次要使用的是带 <code>_planar</code> 的脚本。</strong>不要把初始 compact 输出中那个只提示恢复 STL 的 <code>import_lumerical.lsf</code> 当作同一条路线。两者名字相近，但服务于不同出口。</p>
+<h3>C. 在同一个目录中生成共面 MAT、导入脚本与报告</h3>
+<pre>&amp; $toolPython $toolEntry export-coplanar $outputDir --min-faces 2</pre>
+<p>这条命令增加三个文件：<code>meshes/material_0002_coplanar.mat</code>、<code>import_lumerical_coplanar.lsf</code> 和 <code>coplanar_report.json</code>。此时目录中共 9 个文件。MAT 是 v7.3 / HDF5 格式的顶点和变长面边界数据，LSF 告诉 Lumerical 如何加载、建立对象、设置材料与位置；报告记录合并与检查。</p>
+<p><strong>这一次要使用的是带 <code>_coplanar</code> 的脚本。</strong>不要把初始 compact 输出中那个只提示恢复 STL 的 <code>import_lumerical.lsf</code>，或旧 v5 <code>_planar</code> 脚本当作同一条路线。</p>
 <p>检查 <code>material_map.json</code>：本例晶硅有一个 Palik 默认映射，这是光学材料选择，不是源文件材料编号自动携带的折射率。如果出现 <code>null</code>，需要填成本机材料库里真实存在的名称，再执行：</p>
-<pre>&amp; $toolPython $toolEntry export-planar $outputDir `
+<pre>&amp; $toolPython $toolEntry export-coplanar $outputDir `
   --material-map "$outputDir\material_map.json"</pre>
 <h3>D. 在 Lumerical 里接收几何，再检查它是否正确</h3>
-<p>手动打开 Lumerical FDTD 的空白工程，在脚本编辑器中打开并运行刚生成的 <code>import_lumerical_planar.lsf</code>。脚本读取 MAT，按顶点与面表创建对象、设置材料，并恢复位移。转换器自身并没有替你运行这一步。</p>
+<p>手动打开 Lumerical FDTD 的空白工程，在脚本编辑器中打开并运行刚生成的 <code>import_lumerical_coplanar.lsf</code>。脚本读取 MAT，将变长面边界转成 cell，调用 <code>addplanarsolid</code> 创建对象、设置材料并恢复位移。转换器自身并没有替你运行这一步。</p>
 <p>先检查三个具体问题：结构的长宽高是否对应裁剪范围；X/Y/Z 和上下方向是否正确；凸起硅与周围刻蚀区域的截面是否符合预期。对于这个小范围，整体裁剪盒约为 2.8×2×1 µm，但实际材料表面和人工闭合面仍需看截面。</p>
-<p>如果脚本报告材料不存在，先修正映射；如果导入接口或大面数处理在你的软件版本里遇到问题，保留错误信息，再处理具体兼容性。新 MAT/LSF 已完成离线数组验证，本次尚未在商业 CAD 内执行，所以教程不能把“预期出现对象”写成“已经实测导入成功”。</p>
+<p>如果脚本报告材料不存在，先修正映射；如果加载文件、导入接口或大面数处理在你的软件版本里遇到问题，保留错误信息，再处理具体兼容性。新路线的实际验证范围请查看<a href="coplanar.html#limits">共面路线说明</a>。不能只凭文件生成或 Python 回读，就推断任意版本的 CAD 均已导入成功。</p>
 <p>几何检查通过后，在 Lumerical 中保存 FSP 工程。此时完成的是<strong>几何转换与导入</strong>。要运行 532 nm 光学仿真，还需要求解区域、材料光学模型、光源、边界和监视器；这些是下一阶段的电磁建模工作。</p>
 <div class="step-done">到这里，同一份小范围结构已经走过了完整路线：原 VDATA → 材料数组 → fraction 表面 → compact 归档 → MAT/LSF → 手工在 FDTD 中接收。下面的选项只在需要时做，不是继续操作的必经步骤。</div>
+<h3>接着复用同一份网格：另存删除未引用顶点的版本</h3>
+<p>前面已经生成保留完整顶点表的普通多边形版。现在对同一个<code>$outputDir</code>加一个参数，生成删除未引用顶点的独立版本；不必重复解码与重建：</p>
+<pre>&amp; $toolPython $toolEntry export-coplanar $outputDir --min-faces 2 --compact-vertices</pre>
+<p>普通版使用<code>import_lumerical_coplanar.lsf</code>，清理版使用<code>import_lumerical_coplanar_compact.lsf</code>。分别在空白工程中执行，避免叠加。每种材料各有一个对应 MAT，另有每版共用的报告；<a href="coplanar.html#operate">文件列表和一步生成命令</a>把完整路径、材料更新和验证顺序连在一起说明。</p>
 <h3>可选：已有软件流程要求 STL</h3>
 <pre>&amp; $toolPython $toolEntry export-stl $outputDir</pre>
 <p>它在同一目录增加 STL，并更新不带 <code>_planar</code> 的 <code>import_lumerical.lsf</code>。这次在 FDTD 中用这份 STL 脚本。两个出口使用同一个已有网格，不要在同一个工程里把同一结构导入两遍。</p>
@@ -348,7 +354,7 @@ $outputDir = "D:\CoventorProjects\My_First_AH53_Conversion"
 &amp; $toolPython $toolEntry convert $planeInput `
   --output "D:\CoventorProjects\My_First_AH53_Plane" `
   --surface plane --storage compact</pre>
-<p>这两种新输出若要交给 Lumerical，同样各自执行 <code>export-planar</code> 或 <code>export-stl</code>。不要把完整模型的大小与小范围 plane 模型的大小直接当作算法优劣对比。</p>
+<p>这两种新输出若要交给 Lumerical，同样各自执行 <code>export-coplanar</code> 或 <code>export-stl</code>。不要把完整模型的大小与小范围 plane 模型的大小直接当作算法优劣对比。</p>
 <h3>可选：小范围检查通过后，扩大为完整 AH53</h3>
 <p>仅去掉裁剪参数，保持你选定的表面和存储选项，使用新的输出目录：</p>
 <pre>&amp; $toolPython $toolEntry convert $inputVdata `
@@ -436,14 +442,9 @@ for block in iter_mesh_array_blocks("material_0002.vmesh", "faces"):
 
 <details id="lumerical"><summary>对应第④步：MAT、LSF、STL、FSP 的角色及单位</summary>
 <div class="table"><table><thead><tr><th>文件</th><th>保存什么</th><th>谁使用它</th></tr></thead><tbody><tr><td>VMESH</td><td>压缩索引几何和位移</td><td>本工具/接入读取器的自研程序</td></tr><tr><td>STL</td><td>三角面逐面坐标，标准格式不携带可靠单位和材料</td><td>Lumerical STL 导入等</td></tr><tr><td>本路线的 MAT</td><td>顶点、面索引、位移数组</td><td>Lumerical matlabload + Planar Solid</td></tr><tr><td>LSF</td><td>加载数据、创建对象及设材料/位置的操作文本</td><td>Lumerical 脚本执行器</td></tr><tr><td>FSP</td><td>Lumerical 工程，包括其中已有的对象和设置</td><td>由 Lumerical 保存</td></tr></tbody></table></div>
-<p>Planar MAT 的顶点是 N×3 的局部米坐标，面表是 3×1×F，面索引从 Python 的0改为接收端的1，并以能精确表示这些整数的 double 保存。顶点必须先于面表设置。</p>
-<pre>matlabload("material_0002_planar.mat");
-addplanarsolid;
-set("vertices",vdata_vertices);
-set("facets",vdata_facets);
-# 之后设置实际材料与以米为单位的 x/y/z 平移</pre>
+<p>旧三角 Planar MAT 的面表是 3×1×F，使用 SciPy v5，本机2025 R2不兼容该文件读取；新共面 v7.3 MAT 的顶点仍是 N×3 局部米坐标，但面边界由 flat 和 offsets 两条数值数组保存，索引从1开始。LSF 在 CAD 内重建嵌套 cell，再调用构造函数。详见<a href="coplanar.html#arrays">数组示例、真实变量名和 Python 读取方法</a>。Python 中读取新文件使用 <code>hdf5storage.loadmat</code>。</p>
 <p>生成的正式脚本还会检查组名是否已经存在、材料是否可用。未知材料会阻止导入，不会悄悄填一个固定折射率。STL 出口使用微米坐标数值和 10⁻⁶ 缩放。两种出口都是几何输入，还没有光源、边界或求解结果。</p>
-<p>移动结果目录之后，可重新执行对应的 export-planar 或 lsf 命令刷新脚本路径和材料映射。程序会验证记录过的几何哈希，不覆盖不明来源的同名文件。</p></details>
+<p>移动结果目录之后，可重新执行对应的 export-coplanar 或 STL 路线的 lsf 命令刷新脚本路径和材料映射。程序会验证记录过的几何哈希，不覆盖不明来源的同名文件。</p></details>
 
 <details id="files"><summary>把完整过程映射到源码文件和输出文件</summary>
 <pre>D:\CoventorProjects\VDATA_Standalone\
@@ -458,7 +459,9 @@ set("facets",vdata_facets);
     reconstruction.py         第②步的可选vof重建
     meshing.py                第②步三角化、几何检查、可选QEM与STL写出
     storage.py                第③步无损网格压缩与读取
-    planar.py                 第④步MAT及导入脚本文本生成
+    planar.py                 第④步旧版三角MAT v5及导入脚本文本
+    coplanar.py               严格共面片区与保留边界的几何检查
+    coplanar_export.py        新版多边形v7.3 MAT、LSF、清单与报告
     planar_optimize.py        严格轴向凸平面的锁边界重三角化
   tests/                      各步骤和完整流程的测试
 
@@ -504,6 +507,6 @@ const stages=[
 ['原始VDATA文件。','解析文件、解压数据、解释坐标和材料记录。','每格材料占比、原点、间距和材料表。此时还没有新建三角表面。'],
 ['已解码的材料记录；选择plane时还需要源平面字段。','三选一：fraction按占比插值，plane利用原平面，vof估计局部平面；再连接成三角面。','一张确定的顶点表和面索引表。重建存在近似，这一步决定表面位置。'],
 ['上一步已经建立的同一张网格。','选择standard写STL/NPZ，或compact无损压缩为VMESH；默认没有QEM减面。','可保存和传输的几何文件。compact能还原原数组，不负责修正表面位置。'],
-['已经保存的几何归档，以及材料名称和位移。','export-planar生成索引MAT/LSF，或export-stl恢复STL/LSF；用户再在FDTD内执行脚本。','接收软件可使用的几何输入。仍需后续电磁模型设置，尚未求解光场。']];
+['已经保存的几何归档，以及材料名称和位移。','export-coplanar生成共面v7.3 MAT/LSF，或export-stl恢复STL/LSF；用户再在FDTD内执行脚本。','接收软件可使用的几何输入。仍需后续电磁模型设置，尚未求解光场。']];
 document.querySelectorAll('[data-stage]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-stage]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-pressed',String(b===button));});const s=stages[Number(button.dataset.stage)];document.getElementById('stage-panel').innerHTML='<p><strong>输入：</strong>'+s[0]+'</p><p><strong>处理：</strong>'+s[1]+'</p><p><strong>输出：</strong>'+s[2]+'</p>';}));
 </script></body></html>

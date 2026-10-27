@@ -1,3 +1,5 @@
 numpy>=1.26,<3
 scikit-image>=0.25,<0.27
 scipy>=1.14,<2
+shapely>=2.0,<3
+hdf5storage>=0.2.2,<0.3

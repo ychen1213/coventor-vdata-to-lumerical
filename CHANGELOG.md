@@ -1,5 +1,23 @@
 # 版本变化
 
+## v0.4.0 — 严格共面多边形出口与未引用顶点清理 — 2026-10-28
+
+将此前独立实验中的共面多边形路线接入正式命令。默认表面重建、默认存储和 QEM 设置不变；新增步骤处理已经重建的表面，不推断新的物理界面。
+
+- 新增 `export-coplanar OUTPUT_FOLDER [--material-map MAP] [--min-faces 2]`，校验已有转换清单及网格，免去重读 VDATA 和再次重建。
+- 新增 `convert --coplanar --coplanar-min-faces 2`，在转换后导出同一条多边形路线。输出每材料的 `meshes/material_NNNN_coplanar.mat`、共用 `import_lumerical_coplanar.lsf`、`coplanar_report.json`，同步更新清单与哈希。
+- 以现有浮点坐标的精确关系进行零容差共面判定。仅合并同向、连通且通过几何检查的单环片区，保留原有全部边界顶点和边；支持单环凹多边形。含孔等多环片区保留原三角形，曲面及近似平面不做拟合。
+- 可选 `--compact-vertices` 删除最终面没有引用的顶点，并重新编号；保留被引用坐标。清理版另存 `_coplanar_compact.mat`、`import_lumerical_coplanar_compact.lsf` 和 `coplanar_compact_report.json`，用于与普通版并排比较，不替换原三角网格。
+- 以数值 CSR 保存变长边界；生成脚本在 Lumerical 内构造嵌套 cell、行向量边界，再调用 `addplanarsolid(vertices, facets)`，设置材料与整体平移。新出口使用 MATLAB v7.3 / HDF5，新增核心开源依赖 Shapely、`hdf5storage` / `h5py`；不需要 MATLAB 安装或 SDK。转换仍不调用 Coventor SDK、安装程序、许可证服务或 Lumerical。
+- 实际 CAD 兼容性测试发现本机 Lumerical 2025 R2 拒绝测试中的 SciPy MAT v5，压缩／非压缩均如此，而内置 `matlabsave` 的 HDF5 文件可读。旧 `export-planar` 保留为历史兼容入口，不作为本机新教程推荐路线；优先使用新 `export-coplanar`，其完整 CAD 验证另记。Python 读取新文件使用 `hdf5storage.loadmat`。
+- 增加连贯的[共面原理与操作教程](docs/coplanar.html)，解释文件体积与 CAD 工作量的区别、CSR、脚本交接、顶点清理及验证范围。
+
+本轮完整回归 **242 个测试及 106 个子测试通过**。对复用已有完整 AH53 网格的正式 `export-coplanar` 路线，在 Lumerical 2025 R2 中实际运行两版新生成 LSF，均完成导入、保存、重开和坐标／材料／位置／旋转检查，未执行电磁求解。由 2,463,058 三角面得到 578,836 CAD 面片；清理版顶点由 1,231,531 减至 846,499，全部 2,850,666 边界索引所指坐标序列逐字节一致。MAT 5,292,505 → 4,990,102 字节，FSP 48,358,140 → 39,117,372 字节；CAD 峰值私有内存约 1.185 → 1.136 GB。每版 CAD 仅测一次，未证明顶点清理提速。详细范围和原始数据见 [v0.4.0 验证记录](docs/evidence/v040_validation.json)与[教程实测表](docs/coplanar.html#current-validation)。
+
+另完成原始完整 AH53 VDATA 的一条命令验证：`convert INPUT --output NEW --storage compact --planar-optimize --coplanar --compact-vertices`。解码／重建／旧平面优化／归档 25.0873 秒，共面出口 78.4410 秒，阶段合计 103.5283 秒，不含 CAD；输出 9 文件，MAT 4,990,102 字节，源哈希不变。新 VMESH 的顶点／面／平移及 MAT 四数组均逐字节等于此前真实 CAD 验证的来源，未重复运行相同几何的 CAD。旧 `--planar-optimize` 在此命令中显式开启，不是 `--coplanar` 的隐含步骤。
+
+面片减少 76.5% 只适用于已测 AH53，不是通用比例。保持既有表面不能证明重建界面与真实工艺一致；CAD 内存减少不等于 FDTD 求解器内存同比减少。孔洞多环合并、多材料共享界面与自动 Mesh Order 尚未实现。
+
 ## v0.3.0 — 流式裁剪与规则平面优化 — 2026-10-27
 
 正式升级读取和可选几何处理流程。默认仍采用 `fraction + standard + reduction=0`；平面重三角化和活跃块提取须明确开启。未开启新选项时，真实 XYZ 裁剪对照中的网格数组与 v0.2.0 逐字节一致。转换始终不调用 Coventor SDK 或 Lumerical CAD。

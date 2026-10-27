@@ -1,10 +1,10 @@
 # Coventor VDATA → Lumerical：独立转换器与图文教程
 
-将已经导出的 Coventor VoxelXML `.vdata` 读取为材料/占比数组，独立重建三角表面，输出 STL 或索引 MAT 及 Lumerical 导入脚本。支持流式裁剪、不减面、无损网格压缩、锁边界的规则平面优化和可选 QEM 减面。
+将已经导出的 Coventor VoxelXML `.vdata` 读取为材料/占比数组，独立重建三角表面，输出 STL、索引三角 MAT 或共面多边形 MAT 及 Lumerical 导入脚本。支持流式裁剪、不减面、无损网格压缩、锁边界的规则平面优化、严格共面合并和可选 QEM 减面。
 
 **转换过程无需 Coventor SDK、Coventor 安装或商业许可证，只使用普通 Python 与开源库。** 当前支持已经核验的 VoxelXML 编码，不能承诺读取任意版本、任意内部格式的 `.vdata`。真实 VDATA 文件由使用者提供，也可用仓库的人工小样演练。
 
-当前算法版本 **0.3.0**，更新日期 **2026-10-27**。本次升级将流式 ROI 解码接入正式流程，增加可选平面重三角化和活跃块提取。基础默认几何与 v0.2.0 保持一致；改变网格划分或提取策略的选项须明确开启。完整说明见 [v0.3.0 升级与测量报告](docs/upgrade_v030.html)、[验证记录](docs/evidence/v030_validation.json)和 [版本变化](CHANGELOG.md)。
+当前版本 **0.4.0**，更新日期 **2026-10-28**。新增严格共面多边形出口：复用已有重建表面，减少交给 CAD 的面片；可选清理未引用顶点。默认表面重建不变，不自动启用合并或 QEM。先看[共面路线的原理与操作](docs/coplanar.html)及[版本变化](CHANGELOG.md)；上一版的流式裁剪、旧平面重三角化和活跃块提取见 [v0.3.0 升级报告](docs/upgrade_v030.html)。
 
 ## 先安装，再完成第一次转换
 
@@ -48,11 +48,17 @@ $outputDir = ".\outputs\sample_compact"
 | 用途 | 下一步命令 | 结果 |
 |---|---|---|
 | 传统 STL 导入 | `& $toolPython run.py export-stl $outputDir` | 展开 STL，更新 `import_lumerical.lsf`；在 Lumerical 中执行该脚本 |
-| 共享顶点的 MAT 导入 | `& $toolPython run.py export-planar $outputDir` | 生成索引 MAT 和 `import_lumerical_planar.lsf`；使用这个 Planar Solid 脚本 |
+| 旧版三角 MAT，保留兼容入口 | `& $toolPython run.py export-planar $outputDir` | SciPy MAT v5；本机 Lumerical 2025 R2 实测无法 `matlabload`，优先使用下面的新出口 |
+| 共面多边形导入 | `& $toolPython run.py export-coplanar $outputDir` | 合并严格共面单环面，生成 `*_coplanar.mat`、`import_lumerical_coplanar.lsf` 和报告 |
+| 多边形并清理未引用顶点 | `& $toolPython run.py export-coplanar $outputDir --compact-vertices` | 另存 `*_coplanar_compact.mat`、独立脚本和报告，保留前一种输出 |
 | 自研程序使用材料数组 | 无需继续导出表面 | 读取 `voxels.npz` 与 `voxel_metadata.json` |
 | 自研程序使用紧凑三角网格 | 无需展开为 STL | 使用 `vdata_standalone.storage` 读取 `.vmesh` |
 
-MAT 路线保存顶点和面索引，**不是三维二值体素掩模 MAT**。已通过矩阵往返检查，但本版本尚未完成实际 Lumerical CAD 导入验证，应先在小范围模型上验证。
+这两类 MAT 都保存表面几何，**不是三维二值体素掩模 MAT**。`export-planar` 保留全部三角面并写旧 SciPy MAT v5；`export-coplanar` 用多边形表达符合条件的平面片，改写 **MATLAB v7.3 / HDF5**。同为 `.mat` 后缀不保证内部格式相同。本机 Lumerical 2025 R2 已拒绝测试中的压缩／非压缩 SciPy v5，而能读取其内置 `matlabsave` 的 HDF5 文件；因此新操作优先选 `export-coplanar`，实际新文件导入仍以[本轮验证记录](docs/coplanar.html#limits)为准。
+
+本轮已实际运行正式程序为完整 AH53 网格生成的两版 LSF，完成 CAD 导入、保存与重开；未进行电磁求解。共面版 578,836 个面，顶点清理版由 1,231,531 顶点减至 846,499，FSP 由约 48.36 MB 降至 39.12 MB。每版只测一次，不能宣称清理版更快；详细范围见[本轮实测](docs/coplanar.html#current-validation)和[公开验证摘要](docs/evidence/v040_validation.json)。
+
+另已从原始完整 AH53 VDATA 实际完成一条 `convert` 命令，**显式指定 `--storage compact --planar-optimize --coplanar --compact-vertices`**，得到 9 个文件；解码／重建／旧平面优化／归档与共面出口阶段合计约 103.53 秒，不含 CAD。其 VMESH 顶点、面、位移及 MAT 四数组均逐字节等于已完成上述 CAD 验证的来源，因此未重复运行相同几何的 CAD。原始 VDATA 哈希不变。此处旧 `--planar-optimize` 是明确开启的额外步骤，不是 `--coplanar` 隐含行为。
 
 这些命令不启动 Lumerical、不保存 `.fsp`，也不执行电磁求解。在 Lumerical 中导入几何后，还需设置材料、计算区域、光源、边界、网格和监视器，才能运行仿真。
 
@@ -77,6 +83,27 @@ MAT 路线保存顶点和面索引，**不是三维二值体素掩模 MAT**。�
 - **STL 怎样成为可运行的 Lumerical 模型**：从封闭边界与材料指定，讲到仿真设置、Yee 网格及界面处理，区分几何文件、FSP 工程与求解器数组。
 
 理解基础过程后，再看 `plane` / `vof` 改变了什么、无损存储和 QEM 减面各改变什么、误差数字怎样解释。最后沿同一输入和输出目录完成操作；编码、公式与源码结构放在可展开附录。
+
+## 已有表面怎样进一步减轻 CAD 导入
+
+把 STL 改成索引 MAT 可以减少重复坐标，但 CAD 仍需处理原来的每一个三角面。v0.4 增加下一步：将同向、连通、**严格共面且具有单环边界**的三角形改记成一个多边形。可处理单环凹轮廓；保留全部边界顶点和边。含孔等多环片区保留原三角形。判定采用现有浮点坐标的精确关系、零容差，不把近似平面压平。
+
+```powershell
+# 先复用已有转换目录；无需重读原 VDATA
+& $toolPython run.py export-coplanar $outputDir --min-faces 2
+
+# 再生成可并排比较的清理版：仅删去没有面引用的顶点并重编号
+& $toolPython run.py export-coplanar $outputDir --min-faces 2 --compact-vertices
+
+# 从 VDATA 开始，也能一次生成该出口；输出目录须全新
+& $toolPython run.py convert $inputVdata `
+  --output ".\outputs\coplanar_compact" --storage compact `
+  --coplanar --coplanar-min-faces 2 --compact-vertices
+```
+
+普通版生成 `meshes/material_NNNN_coplanar.mat`、`import_lumerical_coplanar.lsf` 和 `coplanar_report.json`；清理版使用 `_coplanar_compact.mat`、`import_lumerical_coplanar_compact.lsf`、`coplanar_compact_report.json`，不会替换普通版或原三角网格。清单和文件哈希同步更新。需要材料映射时，给 `export-coplanar` 加 `--material-map "$outputDir\material_map.json"`。
+
+MAT 用 CSR 形式保存变长多边形边界，LSF 在本机 Lumerical 中还原嵌套 cell，再调用 `addplanarsolid(vertices, facets)`。几何处理采用开源 Shapely；v7.3 文件由开源 `hdf5storage` / `h5py` 写入，不依赖 MATLAB 安装或 SDK。Python 中检查新 MAT 用 `hdf5storage.loadmat`，不沿用 SciPy 的 v5 读取例子。操作、数组示例、旧实验基准和限制见[连贯的共面教程](docs/coplanar.html)。合并保留的参照是已有重建表面；它不会恢复原始文件中缺少的界面信息，也不意味着 FDTD 求解器内存随 CAD 内存同比下降。
 
 ## v0.3.0 怎样进一步节省转换时间和空间
 
@@ -197,6 +224,7 @@ sample_compact/
 - `export-stl` 新增一个 STL，并更新原脚本和清单，单材料示例成为 **7 文件**。
 - `export-planar` 新增一个 MAT 和一个 Planar Solid 脚本，单材料示例成为 **8 文件**。
 - 两种导出都执行则为 **9 文件**。它们是不同交接方式，不要求全部执行。
+- `export-coplanar` 在基础目录上新增每实体一个 MAT、一个共用 LSF、一个共用报告；单材料只执行普通版时共 **9 文件**，再执行清理版则共 **12 文件**。只执行清理版而不生成普通版时也是 **9 文件**。它们同步更新原清单，保留源网格。
 
 默认 `standard` 输出以 STL 和索引 NPZ 替代单个 VMESH，同样条件下基础输出为 7 文件。应以 `conversion_manifest.json` 的状态和文件列表确认实际结果。
 
@@ -216,7 +244,7 @@ sample_compact/
 | 改进对象 | 已测结果 | 适用边界 |
 |---|---|---|
 | 不减面的网格存储 | 同一张 4,984,128 面网格：STL 249.21 MB，索引 NPZ 28.55 MB，VMESH 约 **1.91 MB** | VMESH 是压缩归档；1.91 MB 不是原生 STL，也不是整个输出目录大小 |
-| 索引 MAT 导出 | 保留相同全部三角面，压缩 MAT 约 **21.03 MB** | 已做矩阵往返检查，尚未完成实际 Lumerical CAD 导入验证 |
+| 索引 MAT 导出 | 保留相同全部三角面，压缩 MAT 约 **21.03 MB** | 这是 v0.2.0 当时的离线矩阵验证；后续 CAD 与共面路线需查看各自记录 |
 | 使用已保存的平面 | 小范围模型中，94 条历史原生射线同 YZ 沿 X 的交点误差 RMS **2.55 → 1.11 nm**，样本最大值 **13.46 → 5.13 nm** | 只评价这些样本，不是全表面误差上界或光学位置误差 |
 | VOF 引导重建 | 合成斜平面改善明显；真实 AH53 沿 X 射线 RMS 约 **2.19 nm** | 该真实样例最近表面距离 RMS/P95 略有恶化，总体积一致性也未改善，仍是实验选项 |
 
@@ -236,7 +264,7 @@ VMESH 对生成后的索引网格做逐比特往返检查：float64 顶点位模
 
 已测平面约定为 `n·u=d`，`u` 从体素低角点起算并按格宽归一化，第一材料位于负侧。`plane` 保留原始偏移 `d`，源平面切格体积可能与记录占比不一致，清单会记录差异；该约定不能承诺适用于所有厂商版本。
 
-读取器可处理材料表中的多个材料，默认导出有体积且不是 Air/Void 的材料，也可用 `--materials 2,18` 选择。每种材料独立提取表面，三相交界或极薄层可能有缝隙、重叠或消失，当前不保证严格共形的多材料分区。因此 QEM 和 `convert --planar-optimize` 目前都限制为一个实际导出实体材料。共享界面重建、包含关系和 Mesh Order 自动设置不属于 v0.3.0 已实现功能。
+读取器可处理材料表中的多个材料，默认导出有体积且不是 Air/Void 的材料，也可用 `--materials 2,18` 选择。每种材料独立提取表面，三相交界或极薄层可能有缝隙、重叠或消失，当前不保证严格共形的多材料分区。因此 QEM 和 `convert --planar-optimize` 目前都限制为一个实际导出实体材料。共享界面重建、包含关系和 Mesh Order 自动设置尚未实现，共面出口不会补出这些信息。
 
 ## 在 Python 里查看实际材料占比
 
@@ -282,8 +310,8 @@ print("One XY cross section:", fraction[:, :, fraction.shape[2] // 2])
 & $toolPython run.py lsf $outputDir `
   --material-map "$outputDir\material_map.json"
 
-# MAT 路线使用对应命令
-& $toolPython run.py export-planar $outputDir `
+# 新共面 MAT 普通版；若原来使用清理版，则继续加 --compact-vertices
+& $toolPython run.py export-coplanar $outputDir `
   --material-map "$outputDir\material_map.json"
 ```
 
@@ -312,9 +340,12 @@ vdata_standalone/
   meshing.py                 表面提取、可选活跃块 mask、STL 写出和 QEM
   planar_optimize.py         锁边界的严格轴向凸平面重三角化
   storage.py                 全部三角面保留的无损归档与分块读取
-  planar.py                  共享顶点 MAT 与 Planar Solid 脚本
+  planar.py                  旧版 SciPy MAT v5 三角面兼容出口
+  coplanar.py                严格共面片区、单环边界与 CSR 几何检查
+  coplanar_export.py         多边形 MAT/LSF、清单、哈希与导出报告
   cli.py                     流程、归档、坐标、材料表与 LSF
 docs/tutorial.html           初学者完整图文教程
+docs/coplanar.html            从 STL 导入瓶颈到共面多边形与顶点清理
 docs/upgrade_v030.html        v0.3.0 升级原理、操作与测量
 docs/evidence/v030_validation.json   v0.3.0 验证记录
 docs/assets/                教程图片和图示资源
@@ -330,7 +361,7 @@ pyproject.toml               包配置与 vdata-convert 命令
 & $toolPython -m pytest -q
 ```
 
-v0.3.0 的测试数量及实际运行结果见[验证记录](docs/evidence/v030_validation.json)。新增检查包括 ROI 与全量切片逐字节一致、记录跨块/chunk、ROI 外错误拒绝、源/区域元数据、平面锁边及回滚、活跃块与默认提取一致。真实 plane/vof XYZ 裁剪与 v0.2.0 对照，体素、平面及网格顶点/面索引/平移全部逐字节一致。
+v0.4.0 完整回归 **242 个测试及 106 个子测试通过**，正式命令的真实 CAD 验证及范围见[新验证记录](docs/evidence/v040_validation.json)。v0.3.0 的历史数量与实际运行结果仍见[旧验证记录](docs/evidence/v030_validation.json)。旧版新增检查包括 ROI 与全量切片逐字节一致、记录跨块/chunk、ROI 外错误拒绝、源/区域元数据、平面锁边及回滚、活跃块与默认提取一致。真实 plane/vof XYZ 裁剪与 v0.2.0 对照，体素、平面及网格顶点/面索引/平移全部逐字节一致。
 
 历史 v0.2.0 实现验证为 **123 个测试通过，另有 40 个子测试**。测试覆盖格式错误、坐标、几何和归档往返，并实际阻止厂商模块导入、安装目录访问和子进程启动，以检查独立路径。另有 7 个本机真实文件的读取验证，覆盖 um/nm、非零原点、单/多材料、含/不含界面字段；原始字节与独立解码公式相符，已知材料体积与历史量测相符。
 
