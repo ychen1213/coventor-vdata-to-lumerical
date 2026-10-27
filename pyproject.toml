@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coventor-vdata-standalone"
-version = "0.2.0"
+version = "0.3.0"
 description = "Independent VoxelXML decoder and open-source surface reconstruction; no vendor SDK runtime"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.26,<3", "scikit-image>=0.25,<0.27", "scipy>=1.14,<2"]

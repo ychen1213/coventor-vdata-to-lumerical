@@ -6,6 +6,6 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if not args:
         args = ["--help"]
-    elif args[0] not in {"inspect", "decode", "convert", "lsf", "pack-mesh", "export-stl", "export-planar"} and not args[0].startswith("-"):
+    elif args[0] not in {"inspect", "decode", "convert", "lsf", "pack-mesh", "optimize-mesh", "export-stl", "export-planar"} and not args[0].startswith("-"):
         args.insert(0, "convert")
     raise SystemExit(main(args))

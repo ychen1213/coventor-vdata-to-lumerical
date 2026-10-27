@@ -19,17 +19,41 @@ import numpy as np
 
 from .reader import (_ByteReader, _CHUNK, _inflate_block, _NoDoctypeBuilder,
                      DEFAULT_MAX_RAW_BYTES, MAX_XML_BYTES, inspect_vdata,
-                     fraction_for_material)
+                     fraction_for_material, _normalize_crop, _crop_metadata,
+                     _CropWriter, _RecordStream)
+
+
+class _PlaneValidator:
+    """Check every source record before cropping, using bounded chunk arrays."""
+    def __init__(self):
+        self.nonzero_count = 0
+        self.minimum, self.maximum = float("inf"), 0.0
+
+    def __call__(self, data):
+        values = np.frombuffer(data, dtype="<f4").reshape(-1, 4).astype(np.float64)
+        if not np.isfinite(values).all():
+            raise ValueError("Nonfinite plane values; unsupported data or byte order")
+        lengths = np.linalg.norm(values[:, :3], axis=1)
+        active = lengths > 0
+        if np.any(abs(lengths[active] - 1) > 1e-3):
+            raise ValueError("Unverified nonzero plane normals: expected unit lengths")
+        if np.any(active):
+            self.nonzero_count += int(active.sum())
+            self.minimum = min(self.minimum, float(lengths[active].min()))
+            self.maximum = max(self.maximum, float(lengths[active].max()))
 
 
 def decode_plane_equations(path, output_path=None, *,
-                           max_raw_bytes=DEFAULT_MAX_RAW_BYTES):
+                           max_raw_bytes=DEFAULT_MAX_RAW_BYTES, crop_indices=None):
     """Decode exact plane bytes; return (float32 XYZ4 array, metadata).
 
     Accept only the observed !zlib! / float32-LE schema. Zero normals are
     allowed (no valid interface plane). Finite unit normals are required for
     nonzero records, preventing common wrong-byte-order interpretations.
-    Optional output is a newly created .npy mmap. No source file is modified.
+    Optional output is a newly created .npy mmap. ``crop_indices`` is three
+    source-XYZ half-open integer pairs. All source bytes are validated/hashed;
+    only ROI bytes are stored. The decoded byte cap remains a full-source cap.
+    No source file is modified.
     The returned metadata explicitly separates byte decoding from the
     empirical geometric convention. Doping and other fields are not decoded.
     """
@@ -45,6 +69,8 @@ def decode_plane_equations(path, output_path=None, *,
     expected = math.prod(meta["dimensions_xyz"]) * 16
     if expected > cap or expected > np.iinfo(np.intp).max:
         raise ValueError(f"Plane array size {expected} exceeds the decoded byte limit")
+    crop = _normalize_crop(meta["dimensions_xyz"], crop_indices)
+    region = _crop_metadata(meta, crop)
     parser = ET.XMLParser(target=_NoDoctypeBuilder())
     source_hash = hashlib.sha256()
     consumed = 0
@@ -66,7 +92,7 @@ def decode_plane_equations(path, output_path=None, *,
             raise ValueError("PlaneEquations must contain nonempty base64 text only")
         if node.attrib and node.attrib != {"encoding": "base64"}:
             raise ValueError("Unverified PlaneEquations encoding declaration")
-    shape = tuple(meta["dimensions_xyz"]) + (4,)
+    shape = tuple(region["crop_dimensions_xyz"]) + (4,)
     target = None if output_path is None else Path(output_path).resolve()
     planes, flat = None, None
     created = False
@@ -81,6 +107,10 @@ def decode_plane_equations(path, output_path=None, *,
         flat = planes.view(np.uint8).reshape(-1)
         count = blocks = 0
         raw_hash = hashlib.sha256()
+        region_hash = hashlib.sha256()
+        writer = _CropWriter(flat, meta["dimensions_xyz"], crop, 16, digest=region_hash)
+        validator = _PlaneValidator()
+        records = _RecordStream(16, validator)
         for node in nodes:
             reader = _ByteReader(node.text or "")
             while True:
@@ -93,46 +123,42 @@ def decode_plane_equations(path, output_path=None, *,
                 if raw_size <= 0 or packed_size <= 0 or count + raw_size > expected:
                     raise ValueError("Invalid plane block sizes")
                 for chunk in _inflate_block(reader, packed_size, raw_size):
-                    flat[count:count + len(chunk)] = np.frombuffer(chunk, dtype=np.uint8)
+                    records.feed(chunk)
+                    writer.feed(chunk)
                     count += len(chunk)
                     raw_hash.update(chunk)
                 blocks += 1
         if count != expected:
             raise ValueError(f"Decoded plane length {count} differs from expected {expected}")
-        nonzero_count = 0
-        minimum, maximum = float("inf"), 0.0
-        for start in range(0, planes.size // 4, _CHUNK):
-            values = planes.reshape(-1, 4)[start:start + _CHUNK].astype(np.float64)
-            if not np.isfinite(values).all():
-                raise ValueError("Nonfinite plane values; unsupported data or byte order")
-            lengths = np.linalg.norm(values[:, :3], axis=1)
-            active = lengths > 0
-            if np.any(abs(lengths[active] - 1) > 1e-3):
-                raise ValueError("Unverified nonzero plane normals: expected unit lengths")
-            if np.any(active):
-                nonzero_count += int(active.sum())
-                minimum = min(minimum, float(lengths[active].min()))
-                maximum = max(maximum, float(lengths[active].max()))
+        records.finish()
+        if writer.stored_count != planes.nbytes or writer.interval is not None:
+            raise ValueError("Stored plane crop byte count does not match its dimensions")
         if target is not None:
             planes.flush()
         report = {
             "source_sha256": meta["source_sha256"],
             "raw_plane_sha256": raw_hash.hexdigest(),
+            "region_plane_sha256": region_hash.hexdigest(),
             "dimensions_xyz": meta["dimensions_xyz"], "plane_shape": list(shape),
             "origin_m": meta["origin_m"], "voxel_size_m": meta["voxel_size_m"],
             "dtype": "<f4", "axis_order": "X,Y,Z,(nx,ny,nz,d), C-order",
             "decoded_bytes": count, "compressed_blocks": blocks,
-            "decoded_bytes_preserved": True, "nonzero_normal_count": nonzero_count,
-            "normal_length_range": [minimum, maximum] if nonzero_count else None,
+            "stored_bytes": writer.stored_count,
+            "decoded_bytes_preserved": True, "nonzero_normal_count": validator.nonzero_count,
+            "normal_validation_scope": "entire source, including records outside the crop",
+            "normal_length_range": [validator.minimum, validator.maximum] if validator.nonzero_count else None,
             "plane_equation": "dot(n,u)=d; u=(world-origin)/h-voxel_index",
             "coordinate_convention_status": "Empirically verified on saved AH53 crop measurements, not a universal vendor specification",
             "nonzero_normal_length_tolerance": 1e-3,
             "vendor_sdk_called": False, "external_references_followed": False,
         }
+        report.update(region)
         return planes, report
     except Exception:
         if created:
             flat = None
+            if "writer" in locals():
+                writer.flat = None
             if planes is not None and getattr(planes, "_mmap", None) is not None:
                 planes._mmap.close()
             planes = None

@@ -1,0 +1,639 @@
+{
+  "date": "2026-10-27",
+  "version": "0.3.0",
+  "baseline_version": "0.2.0",
+  "source_sha256": "66da134572910aa2bcf704399ad6d2fd7cdf87154154a7c8196f214609b13292",
+  "python": "3.12.13",
+  "tests": {
+    "passed": 187,
+    "subtests_passed": 106,
+    "failures": 0
+  },
+  "crop": {
+    "source_dimensions_xyz": [
+      800,
+      1400,
+      50
+    ],
+    "region_dimensions_xyz": [
+      140,
+      100,
+      50
+    ],
+    "bounds_um": [
+      22.6,
+      25.4,
+      -1,
+      1,
+      -0.5,
+      0.5
+    ],
+    "source_raw_bytes": 168000000,
+    "retained_raw_bytes": 2100000,
+    "baseline": {
+      "wall_seconds": [
+        2.562548799905926,
+        2.4234786999877542,
+        2.4525923000182956
+      ],
+      "median_wall_seconds": 2.4525923000182956,
+      "peak_working_set_bytes": [
+        236765184,
+        236359680,
+        235761664
+      ],
+      "median_peak_working_set_bytes": 236359680
+    },
+    "upgraded": {
+      "wall_seconds": [
+        1.8500179999973625,
+        1.7265791001264006,
+        1.6989704999141395
+      ],
+      "median_wall_seconds": 1.7265791001264006,
+      "peak_working_set_bytes": [
+        69238784,
+        69152768,
+        69484544
+      ],
+      "median_peak_working_set_bytes": 69238784
+    },
+    "all_three_trials_byte_equal": {
+      "first": {
+        "raw_records": true,
+        "vertices": true,
+        "faces": true,
+        "translation": true
+      },
+      "_2": {
+        "raw_records": true,
+        "vertices": true,
+        "faces": true,
+        "translation": true
+      },
+      "_3": {
+        "raw_records": true,
+        "vertices": true,
+        "faces": true,
+        "translation": true
+      }
+    }
+  },
+  "full_conversion": {
+    "baseline": {
+      "wall_seconds": 16.7718081001658,
+      "peak_working_set_bytes": 894140416,
+      "peak_committed_bytes": 1218846720
+    },
+    "upgraded_planar": {
+      "wall_seconds": 25.93828019988723,
+      "peak_working_set_bytes": 893251584,
+      "peak_committed_bytes": 1517400064
+    },
+    "measurements": "One actual full conversion each; compact output; MAT/STL export timed separately and excluded."
+  },
+  "mesh": {
+    "before_faces": 4984128,
+    "after_faces": 2463058,
+    "before_vertices": 2492066,
+    "after_vertices": 1231531,
+    "before_vmesh_bytes": 1909791,
+    "after_vmesh_bytes": 1715060,
+    "before_mat_bytes": 21030479,
+    "after_mat_bytes": 9493049,
+    "before_stl_bytes_formula": 249206484,
+    "after_stl_bytes_actual": 123152984,
+    "planar_optimization": {
+      "method": "exact_axis_planar_disks",
+      "changed": true,
+      "arrays_changed": true,
+      "geometric_surface_preserved": true,
+      "min_faces": 128,
+      "candidate_plane_groups": 239,
+      "accepted_patches": 5,
+      "patches": [
+        {
+          "axis": "X",
+          "coordinate_m": -6.07747099184471e-17,
+          "normal_sign": -1,
+          "old_faces": 95132,
+          "new_faces": 2866,
+          "locked_boundary_vertices": 2866
+        },
+        {
+          "axis": "X",
+          "coordinate_m": 1.6000000763344577e-05,
+          "normal_sign": 1,
+          "old_faces": 95132,
+          "new_faces": 2866,
+          "locked_boundary_vertices": 2866
+        },
+        {
+          "axis": "Y",
+          "coordinate_m": -6.07747099184471e-17,
+          "normal_sign": -1,
+          "old_faces": 54332,
+          "new_faces": 1666,
+          "locked_boundary_vertices": 1666
+        },
+        {
+          "axis": "Y",
+          "coordinate_m": 2.7999999368805437e-05,
+          "normal_sign": 1,
+          "old_faces": 54332,
+          "new_faces": 1666,
+          "locked_boundary_vertices": 1666
+        },
+        {
+          "axis": "Z",
+          "coordinate_m": -6.07747099184471e-17,
+          "normal_sign": -1,
+          "old_faces": 2235602,
+          "new_faces": 4396,
+          "locked_boundary_vertices": 4396
+        }
+      ],
+      "skipped": {
+        "below_min_faces": 28,
+        "not_exactly_convex": 451,
+        "no_face_reduction": 84
+      },
+      "before": {
+        "vertices": 2492066,
+        "faces": 4984128,
+        "empty": false,
+        "finite_coordinates": true,
+        "valid_indices": true,
+        "topology_checked": true,
+        "self_intersection_checked": false,
+        "vertex_manifoldness_checked": false,
+        "surface_area_m2": 9.819837924110938e-10,
+        "signed_volume_m3": 3.47295839703879e-16,
+        "volume_m3": 3.47295839703879e-16,
+        "degenerate_faces": 0,
+        "bounds_local_m": [
+          [
+            -6.07747099184471e-17,
+            -6.07747099184471e-17,
+            -6.07747099184471e-17
+          ],
+          [
+            1.6000000763344577e-05,
+            2.7999999368805437e-05,
+            1.0000000054080739e-06
+          ]
+        ],
+        "used_vertices": 2492066,
+        "degenerate_area2_tolerance_m2": 5.570654797228573e-24,
+        "unique_edges": 7476192,
+        "boundary_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 2,
+        "watertight_edges": true,
+        "consistent_winding": true
+      },
+      "input_components": 1,
+      "boundary_coordinates_preserved_exactly": true,
+      "self_intersection_checked": false,
+      "limitations": [
+        "Strict axis-aligned planes only; concave outlines and holes are retained.",
+        "Center fans can contain long, thin triangles; this is not a triangle-quality optimizer.",
+        "Single-material operation does not guarantee conforming multi-material interfaces."
+      ],
+      "after": {
+        "vertices": 1231531,
+        "faces": 2463058,
+        "empty": false,
+        "finite_coordinates": true,
+        "valid_indices": true,
+        "topology_checked": true,
+        "self_intersection_checked": false,
+        "vertex_manifoldness_checked": false,
+        "surface_area_m2": 9.819837924110936e-10,
+        "signed_volume_m3": 3.472958397041608e-16,
+        "volume_m3": 3.472958397041608e-16,
+        "degenerate_faces": 0,
+        "bounds_local_m": [
+          [
+            -6.07747099184471e-17,
+            -6.07747099184471e-17,
+            -6.07747099184471e-17
+          ],
+          [
+            1.6000000763344577e-05,
+            2.7999999368805437e-05,
+            1.0000000054080739e-06
+          ]
+        ],
+        "used_vertices": 1231531,
+        "degenerate_area2_tolerance_m2": 5.570654797228573e-24,
+        "unique_edges": 3694587,
+        "boundary_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 2,
+        "watertight_edges": true,
+        "consistent_winding": true
+      },
+      "output_components": 1,
+      "removed_faces": 2521070,
+      "elapsed_seconds": 10.800675499951467
+    }
+  },
+  "active_blocks": {
+    "full_fraction": {
+      "off": {
+        "mesh_seconds": 7.184232800034806,
+        "marching_cubes_seconds": 3.6066664999816567,
+        "peak_working_set_bytes": 885436416
+      },
+      "on": {
+        "mesh_seconds": 6.751365200150758,
+        "marching_cubes_seconds": 2.859773399773985,
+        "peak_working_set_bytes": 943902720
+      },
+      "vertices_sha256_equal": true,
+      "faces_sha256_equal": true,
+      "mask": {
+        "enabled": true,
+        "block_cells_xyz": [
+          32,
+          32,
+          8
+        ],
+        "total_blocks": 8008,
+        "active_blocks": 3098,
+        "active_block_fraction": 0.38686313686313684,
+        "mask_enabled_samples": 24307630,
+        "mask_total_samples": 58469008,
+        "mask_coverage_fraction": 0.4157352900531509,
+        "mask_bytes": 58469008,
+        "preprocessing_seconds": 0.3005199998151511,
+        "shared_upper_samples": 1,
+        "lower_cell_halo": 1,
+        "geometry_samples_modified": false,
+        "global_extraction": true
+      },
+      "mesh_speedup": 1.0641155658228032,
+      "mesh_reduction_percent": 6.025244614594771,
+      "mc_speedup": 1.261172126528172
+    },
+    "crop_fraction": {
+      "off": {
+        "mesh_seconds": 0.14563830010592937,
+        "marching_cubes_seconds": 0.06228670012205839,
+        "peak_working_set_bytes": 62287872
+      },
+      "on": {
+        "mesh_seconds": 0.1424896998796612,
+        "marching_cubes_seconds": 0.055693799862638116,
+        "peak_working_set_bytes": 62091264
+      },
+      "vertices_sha256_equal": true,
+      "faces_sha256_equal": true,
+      "mask": {
+        "enabled": true,
+        "block_cells_xyz": [
+          32,
+          32,
+          8
+        ],
+        "total_blocks": 140,
+        "active_blocks": 106,
+        "active_block_fraction": 0.7571428571428571,
+        "mask_enabled_samples": 547407,
+        "mask_total_samples": 753168,
+        "mask_coverage_fraction": 0.7268059715760627,
+        "mask_bytes": 753168,
+        "preprocessing_seconds": 0.0037551000714302063,
+        "shared_upper_samples": 1,
+        "lower_cell_halo": 1,
+        "geometry_samples_modified": false,
+        "global_extraction": true
+      },
+      "mesh_speedup": 1.0220970373923681,
+      "mesh_reduction_percent": 2.161931458948674,
+      "mc_speedup": 1.118377634057666
+    },
+    "crop_vof": {
+      "off": {
+        "mesh_seconds": 0.34247379982843995,
+        "marching_cubes_seconds": 0.06130709988065064,
+        "peak_working_set_bytes": 62230528
+      },
+      "on": {
+        "mesh_seconds": 0.35022440017201006,
+        "marching_cubes_seconds": 0.05391249991953373,
+        "peak_working_set_bytes": 62271488
+      },
+      "vertices_sha256_equal": true,
+      "faces_sha256_equal": true,
+      "mask": {
+        "enabled": true,
+        "block_cells_xyz": [
+          32,
+          32,
+          8
+        ],
+        "total_blocks": 140,
+        "active_blocks": 106,
+        "active_block_fraction": 0.7571428571428571,
+        "mask_enabled_samples": 547407,
+        "mask_total_samples": 753168,
+        "mask_coverage_fraction": 0.7268059715760627,
+        "mask_bytes": 753168,
+        "preprocessing_seconds": 0.0035872000735253096,
+        "shared_upper_samples": 1,
+        "lower_cell_halo": 1,
+        "geometry_samples_modified": false,
+        "global_extraction": true
+      },
+      "mesh_speedup": 0.9778696163380864,
+      "mesh_reduction_percent": -2.263122127138706,
+      "mc_speedup": 1.1371592853633872
+    },
+    "crop_plane": {
+      "off": {
+        "mesh_seconds": 0.27693170006386936,
+        "marching_cubes_seconds": 0.06102619995363057,
+        "peak_working_set_bytes": 77524992
+      },
+      "on": {
+        "mesh_seconds": 0.2780977999791503,
+        "marching_cubes_seconds": 0.0556335998699069,
+        "peak_working_set_bytes": 77570048
+      },
+      "vertices_sha256_equal": true,
+      "faces_sha256_equal": true,
+      "mask": {
+        "enabled": true,
+        "block_cells_xyz": [
+          32,
+          32,
+          8
+        ],
+        "total_blocks": 140,
+        "active_blocks": 106,
+        "active_block_fraction": 0.7571428571428571,
+        "mask_enabled_samples": 547407,
+        "mask_total_samples": 753168,
+        "mask_coverage_fraction": 0.7268059715760627,
+        "mask_bytes": 753168,
+        "preprocessing_seconds": 0.005007400177419186,
+        "shared_upper_samples": 1,
+        "lower_cell_halo": 1,
+        "geometry_samples_modified": false,
+        "global_extraction": true
+      },
+      "mesh_speedup": 0.9958068711245887,
+      "mesh_reduction_percent": -0.4210785240591708,
+      "mc_speedup": 1.096930633579953
+    }
+  },
+  "real_plane_and_vof": {
+    "scope": "Actual CLI byte comparisons for an XYZ crop with vendor access blocked",
+    "requested_bounds_um": [
+      22.8,
+      25.2,
+      -0.8,
+      0.8,
+      -0.4,
+      0.4
+    ],
+    "cases": {
+      "plane": {
+        "measurements_note": "One process per case, cases launched concurrently; performance numbers are informational, not a controlled benchmark",
+        "source_hash_equal": true,
+        "source_unchanged": true,
+        "vendor_access_blocked": true,
+        "arrays": {
+          "voxels": {
+            "byte_equal": true,
+            "dtype": "|u1",
+            "shape": [
+              120,
+              80,
+              40,
+              3
+            ],
+            "sha256_baseline": "fc421b537d93f75c52fa9f2a60353f73203b7f41335bc87470798faf7e45effc",
+            "sha256_upgraded": "fc421b537d93f75c52fa9f2a60353f73203b7f41335bc87470798faf7e45effc"
+          },
+          "planes": {
+            "byte_equal": true,
+            "dtype": "<f4",
+            "shape": [
+              120,
+              80,
+              40,
+              4
+            ],
+            "sha256_baseline": "f28f45e8c18d1bffaa68c9be6c07e8943a469dea83bb22e9720416c6fc99a5e8",
+            "sha256_upgraded": "f28f45e8c18d1bffaa68c9be6c07e8943a469dea83bb22e9720416c6fc99a5e8"
+          },
+          "vertices_local_m": {
+            "byte_equal": true,
+            "dtype": "<f8",
+            "shape": [
+              34760,
+              3
+            ],
+            "sha256_baseline": "18c1b2fd32ad21983afbbf853150a646aba414fdc9ffad89d0a780e4afc24324",
+            "sha256_upgraded": "18c1b2fd32ad21983afbbf853150a646aba414fdc9ffad89d0a780e4afc24324"
+          },
+          "faces": {
+            "byte_equal": true,
+            "dtype": "<i4",
+            "shape": [
+              69516,
+              3
+            ],
+            "sha256_baseline": "5351581c80b74cf69e2421cd72b11efe60acea7db30a1abac87262460d07a36e",
+            "sha256_upgraded": "5351581c80b74cf69e2421cd72b11efe60acea7db30a1abac87262460d07a36e"
+          },
+          "translation_m": {
+            "byte_equal": true,
+            "dtype": "<f8",
+            "shape": [
+              3
+            ],
+            "sha256_baseline": "9d5513f717233b845c40d351d0b703ab92bf68762ff749c95860a667aee67276",
+            "sha256_upgraded": "9d5513f717233b845c40d351d0b703ab92bf68762ff749c95860a667aee67276"
+          }
+        },
+        "voxel_metadata_equal": true,
+        "reconstruction_metrics_equal": {
+          "translation_m": true,
+          "crop_dimensions_xyz": true,
+          "source_fraction_volume_m3": true,
+          "field_reconstruction": true,
+          "bounds_local_m": true,
+          "surface_area_m2": true,
+          "volume_m3": true,
+          "degenerate_faces": true,
+          "watertight_edges": true,
+          "consistent_winding": true
+        },
+        "origin_report_transition": {
+          "baseline_source_origin_m": [
+            2.26e-05,
+            -1e-06,
+            -5e-07
+          ],
+          "upgraded_source_origin_m": [
+            2.2800000000000002e-05,
+            -8e-07,
+            -4e-07
+          ],
+          "upgraded_translation_m": [
+            2.2800000000000002e-05,
+            -8e-07,
+            -4e-07
+          ],
+          "source_metadata_origin_m": [
+            2.26e-05,
+            -1e-06,
+            -5e-07
+          ]
+        },
+        "upgraded_source_dimensions": [
+          140,
+          100,
+          50
+        ],
+        "upgraded_region_dimensions": [
+          120,
+          80,
+          40
+        ],
+        "plane_full_source_hash_preserved": true,
+        "plane_metadata_shapes": {
+          "baseline": [
+            140,
+            100,
+            50,
+            4
+          ],
+          "upgraded": [
+            120,
+            80,
+            40,
+            4
+          ]
+        },
+        "plane_source_bytes_equal": true,
+        "plane_roi_bytes": 6144000,
+        "plane_region_hash_matches_saved_array": true
+      },
+      "vof": {
+        "measurements_note": "One process per case, cases launched concurrently; performance numbers are informational, not a controlled benchmark",
+        "source_hash_equal": true,
+        "source_unchanged": true,
+        "vendor_access_blocked": true,
+        "arrays": {
+          "voxels": {
+            "byte_equal": true,
+            "dtype": "|u1",
+            "shape": [
+              120,
+              80,
+              40,
+              3
+            ],
+            "sha256_baseline": "fc421b537d93f75c52fa9f2a60353f73203b7f41335bc87470798faf7e45effc",
+            "sha256_upgraded": "fc421b537d93f75c52fa9f2a60353f73203b7f41335bc87470798faf7e45effc"
+          },
+          "vertices_local_m": {
+            "byte_equal": true,
+            "dtype": "<f8",
+            "shape": [
+              34679,
+              3
+            ],
+            "sha256_baseline": "7c58ccaa20ce91317e52803c62434ba8be4cb1f78b3bb0de9fd9d336e082504e",
+            "sha256_upgraded": "7c58ccaa20ce91317e52803c62434ba8be4cb1f78b3bb0de9fd9d336e082504e"
+          },
+          "faces": {
+            "byte_equal": true,
+            "dtype": "<i4",
+            "shape": [
+              69354,
+              3
+            ],
+            "sha256_baseline": "52cd00173e54477e8f7daef0ac2f2a3f7b9cf66710072885247e6416acdfac2f",
+            "sha256_upgraded": "52cd00173e54477e8f7daef0ac2f2a3f7b9cf66710072885247e6416acdfac2f"
+          },
+          "translation_m": {
+            "byte_equal": true,
+            "dtype": "<f8",
+            "shape": [
+              3
+            ],
+            "sha256_baseline": "4606fcb54fa83fc3e9513dadeef651ed24016a657c91767f1fab404f1cf1854b",
+            "sha256_upgraded": "4606fcb54fa83fc3e9513dadeef651ed24016a657c91767f1fab404f1cf1854b"
+          }
+        },
+        "voxel_metadata_equal": true,
+        "reconstruction_metrics_equal": {
+          "translation_m": true,
+          "crop_dimensions_xyz": true,
+          "source_fraction_volume_m3": true,
+          "field_reconstruction": true,
+          "bounds_local_m": true,
+          "surface_area_m2": true,
+          "volume_m3": true,
+          "degenerate_faces": true,
+          "watertight_edges": true,
+          "consistent_winding": true
+        },
+        "origin_report_transition": {
+          "baseline_source_origin_m": [
+            1.6e-05,
+            -1.4e-05,
+            -5e-07
+          ],
+          "upgraded_source_origin_m": [
+            2.28e-05,
+            -7.999999999999991e-07,
+            -4e-07
+          ],
+          "upgraded_translation_m": [
+            2.28e-05,
+            -7.999999999999991e-07,
+            -4e-07
+          ],
+          "source_metadata_origin_m": [
+            1.6e-05,
+            -1.4e-05,
+            -5e-07
+          ]
+        },
+        "upgraded_source_dimensions": [
+          800,
+          1400,
+          50
+        ],
+        "upgraded_region_dimensions": [
+          120,
+          80,
+          40
+        ]
+      }
+    }
+  },
+  "independence": {
+    "vendor_access_blocked": true,
+    "blocked_attempts": [],
+    "cad_import_executed": false,
+    "optical_solve_executed": false
+  },
+  "limits": [
+    "Local warm-cache measurements, not hardware-independent guarantees.",
+    "Windows working set and committed bytes are different measurements.",
+    "Planar optimization is opt-in; exact axis-aligned, single-loop convex patches only.",
+    "Planar optimization preserves eligible surface geometry but changes arrays; fans can be thin.",
+    "Active blocks is opt-in, adds a mask and may slow small inputs.",
+    "Multi-material conforming reconstruction, containment/Mesh Order automation, block-index fast decoding and Flying Edges are not implemented in this release."
+  ]
+}

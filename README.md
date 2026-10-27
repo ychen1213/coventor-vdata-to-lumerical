@@ -1,10 +1,10 @@
 # Coventor VDATA → Lumerical：独立转换器与图文教程
 
-将已经导出的 Coventor VoxelXML `.vdata` 读取为材料/占比数组，独立重建三角表面，输出 STL 或索引 MAT 及 Lumerical 导入脚本。支持不减面、无损网格压缩和可选 QEM 减面。
+将已经导出的 Coventor VoxelXML `.vdata` 读取为材料/占比数组，独立重建三角表面，输出 STL 或索引 MAT 及 Lumerical 导入脚本。支持流式裁剪、不减面、无损网格压缩、锁边界的规则平面优化和可选 QEM 减面。
 
 **转换过程无需 Coventor SDK、Coventor 安装或商业许可证，只使用普通 Python 与开源库。** 当前支持已经核验的 VoxelXML 编码，不能承诺读取任意版本、任意内部格式的 `.vdata`。真实 VDATA 文件由使用者提供，也可用仓库的人工小样演练。
 
-当前算法版本 **0.2.0**；**2026-10-27** 整理发布软件和最新教程，本次整理不代表新的算法版本。仓库当前入口已切换为独立方案，旧的 Coventor SDK 导出路线不再作为使用步骤。
+当前算法版本 **0.3.0**，更新日期 **2026-10-27**。本次升级将流式 ROI 解码接入正式流程，增加可选平面重三角化和活跃块提取。基础默认几何与 v0.2.0 保持一致；改变网格划分或提取策略的选项须明确开启。完整说明见 [v0.3.0 升级与测量报告](docs/upgrade_v030.html)、[验证记录](docs/evidence/v030_validation.json)和 [版本变化](CHANGELOG.md)。
 
 ## 先安装，再完成第一次转换
 
@@ -78,6 +78,60 @@ MAT 路线保存顶点和面索引，**不是三维二值体素掩模 MAT**。�
 
 理解基础过程后，再看 `plane` / `vof` 改变了什么、无损存储和 QEM 减面各改变什么、误差数字怎样解释。最后沿同一输入和输出目录完成操作；编码、公式与源码结构放在可展开附录。
 
+## v0.3.0 怎样进一步节省转换时间和空间
+
+这次升级分别作用于读取、表面提取和已有平面的三角划分，三个步骤可以独立选择。
+
+**裁剪会自动采用流式 ROI 保存。** 原来是分块解压后存下整个源数组，再切片；现在仍解压并校验全部源记录，但只保存命中的 XYZ 范围。三通道占比/材料字节及可选 PlaneEquations 均保持源记录，不改成单材料标签。下面的范围仅示范命令形式，必须按自己的 `inspect` 结果填写：
+
+```powershell
+& $toolPython run.py convert $inputVdata `
+  --output ".\outputs\roi_compact" --storage compact `
+  --crop-um 22.6 25.4 -1 1 -0.5 0.5
+```
+
+范围以输入世界坐标的微米为单位，边界必须落在原始体素面上。ROI 外的非法材料、占比及已解码平面仍会导致拒绝；`--max-raw-gib` 继续限制完整源的解码字节数。源元数据仍描述完整源，新增 `region_metadata` 描述返回数组；输出 `voxel_metadata.json` 的尺寸、原点描述所选区域。该优化减少不需要的缓存和驻留数据，同一 ROI 的表面不因读取方式改变。
+
+**规则平面可显式重新划分三角形。** 在一个实际导出实体上增加 `--planar-optimize`：
+
+```powershell
+& $toolPython run.py convert $inputVdata `
+  --output ".\outputs\planar_compact" --storage compact `
+  --planar-optimize --planar-min-faces 128
+
+# 已经有 VMESH 或本程序的索引 NPZ 时，直接优化该网格，无需重读 VDATA
+& $toolPython run.py optimize-mesh ".\outputs\sample_compact\meshes\material_0002.vmesh" `
+  --output ".\outputs\material_0002_planar.vmesh" --min-faces 128
+```
+
+优化器寻找严格位于 `X=常数`、`Y=常数` 或 `Z=常数` 平面的同向连通面片。只有单环、凸轮廓、满足闭合及几何检查的面片才替换；原边界上的每个顶点与边都保留，内部改为中心扇形连接。孔洞、凹轮廓、倾斜面和曲面保持原划分。默认面数门槛为 128，`convert --planar-min-faces` 至少为 4。
+
+这里保留的是符合条件的**已有平面所覆盖的几何区域**，顶点和三角面数组会改变；这与 VMESH 的逐比特无损压缩是两种操作。它不会修复重建误差，也不保证全局没有自相交；中心扇形还可能产生瘦长三角形，实际 CAD 导入表现需要另测。真实完整 AH53 的面数已由 4,984,128 降至 2,463,058，减少约 **50.58%**；最终文件大小、时间与审计以升级报告为准。
+
+`optimize-mesh` 处理一个已有的封闭、绕序一致且无退化面的材料网格，输入可为 `.vmesh` 或包含 `vertices_local_m/faces/translation_m` 的索引 `.npz`，输出为一个新 `.vmesh`，拒绝覆盖。它不修改原转换目录或清单，也不推断这个网格是否与其他材料共用界面。若几种材料互相接触，需要共同约束界面后再优化；不能把每种材料独立优化当作共形方案。
+
+**活跃块提取是可选的时间/内存交换。** `--active-blocks` 用 `32×32×8` 个计算单元的 min/max 判断跳过没有界面的区域，保留共享采样点及邻域，随后仍调用同一次全局 Lewiner MC，不在每个块边缘增加人工封口：
+
+```powershell
+& $toolPython run.py convert $inputVdata `
+  --output ".\outputs\active_compact" --storage compact --active-blocks
+```
+
+它不修改标量场，回归案例中顶点、面索引及平移与原提取逐字节一致；这项策略不减少输出面数，也不跳过前面的材料校验、场重建或后面的网格审计。完整 AH53 的一次提取全阶段测量为 7.184 → 6.751 秒，同时新增约 58.47 MB 的 mask。小 ROI 的 VOF 案例可能更慢，所以默认关闭。性能数字只对应已测案例，不能外推为所有文件的提速比例。
+
+三种操作与 QEM 的关系是：
+
+```text
+流式解码所选区域（完整校验源）
+  → fraction / plane / vof 构造界面场
+  → 全局 MC（可选 active-blocks）
+  → 可选 planar-optimize
+  → 可选 QEM
+  → VMESH / STL / MAT
+```
+
+若同时指定 `--planar-optimize --reduction 0.45`，先重划平面，再按**平面优化后的面数**删除约 45%；QEM 仍会改变几何。多材料共形界面、全局包含关系和自动 Mesh Order 尚未实现。
+
 ## 不减面、减面与其他重建路线
 
 下面沿用 `$toolPython`、`$inputVdata`。每次重建使用不同的新输出目录。
@@ -115,9 +169,9 @@ MAT 路线保存顶点和面索引，**不是三维二值体素掩模 MAT**。�
   --output ".\outputs\material_0002.vmesh"
 ```
 
-`--reduction 0.45` 相对于本程序新建的未减面网格计算，不能直接对照旧 Coventor 原生 STL 的减面比例。QEM 会改变几何；任何比例都可能因退化面、非流形、拓扑变化或误差检查而被拒绝。可加 `--max-sampled-error-nm 1.0`，拒绝新增采样距离超过 1 nm 的结果；这不是严格的全表面误差上界，也不是光学位置精度保证。
+`--reduction 0.45` 相对于进入 QEM 的网格计算：未开平面优化时为新重建网格，开平面优化时为优化后的网格，不能直接对照旧 Coventor 原生 STL 的减面比例。QEM 会改变几何；任何比例都可能因退化面、非流形、拓扑变化或误差检查而被拒绝。可加 `--max-sampled-error-nm 1.0`，拒绝新增采样距离超过 1 nm 的结果；这不是严格的全表面误差上界，也不是光学位置精度保证。
 
-默认仍是 `--surface fraction --storage standard --reduction 0`。`compact` 不隐含减面；`both` 同时输出 STL、NPZ 和 VMESH，不适合节省整个目录的空间。可用 `--crop-um XMIN XMAX YMIN YMAX ZMIN ZMAX` 先转换小范围，参数是输入坐标系中的微米坐标，应根据自己的元数据选择。
+默认仍是 `--surface fraction --storage standard --reduction 0`，`--planar-optimize` 与 `--active-blocks` 默认关闭。`compact` 不隐含减面；`both` 同时输出 STL、NPZ 和 VMESH，不适合节省整个目录的空间。可用 `--crop-um XMIN XMAX YMIN YMAX ZMIN ZMAX` 先转换小范围，参数是输入坐标系中的微米坐标，应根据自己的元数据选择。
 
 Windows 下也可把 VDATA 拖到 `run.cmd` 上。安装好仓库内 `.venv` 后，它会使用这个普通 Python，在输入旁创建带时间戳的新目录，采用默认 `fraction + standard` 路线。已有其他普通 Python 时，可设置 `VDATA_STANDALONE_PYTHON` 为其完整路径；需要紧凑存储、裁剪或减面时使用明确命令。
 
@@ -155,9 +209,9 @@ sample_compact/
 
 解码期间的 `.npy` 内存映射缓存是临时文件，成功或失败后关闭并移除。
 
-## 改进与已测结果
+## v0.2.0 历史测量与存储参照
 
-这里的 MB 按十进制计算。以下来自已有 AH53 案例，不代表所有模型具有相同效果。
+这里的 MB 按十进制计算。以下保留 v0.2.0 已有 AH53 测量，作为重建和存储参照，不是开启 v0.3.0 平面优化后的结果；v0.3.0 验证和性能请查看[升级报告](docs/upgrade_v030.html)及[验证记录](docs/evidence/v030_validation.json)。不同模型不一定具有相同效果。
 
 | 改进对象 | 已测结果 | 适用边界 |
 |---|---|---|
@@ -182,7 +236,7 @@ VMESH 对生成后的索引网格做逐比特往返检查：float64 顶点位模
 
 已测平面约定为 `n·u=d`，`u` 从体素低角点起算并按格宽归一化，第一材料位于负侧。`plane` 保留原始偏移 `d`，源平面切格体积可能与记录占比不一致，清单会记录差异；该约定不能承诺适用于所有厂商版本。
 
-读取器可处理材料表中的多个材料，默认导出有体积且不是 Air/Void 的材料，也可用 `--materials 2,18` 选择。每种材料独立提取表面，三相交界或极薄层可能有缝隙、重叠或消失，当前不保证严格共形的多材料分区。因此 QEM 目前限制为一个实际导出实体材料。
+读取器可处理材料表中的多个材料，默认导出有体积且不是 Air/Void 的材料，也可用 `--materials 2,18` 选择。每种材料独立提取表面，三相交界或极薄层可能有缝隙、重叠或消失，当前不保证严格共形的多材料分区。因此 QEM 和 `convert --planar-optimize` 目前都限制为一个实际导出实体材料。共享界面重建、包含关系和 Mesh Order 自动设置不属于 v0.3.0 已实现功能。
 
 ## 在 Python 里查看实际材料占比
 
@@ -243,7 +297,7 @@ print("One XY cross section:", fraction[:, :, fraction.shape[2] // 2])
 
 支持 m、cm、mm、µm/um、nm、Å 等长度单位的 SI 换算，原点单位独立解析。读取器检查损坏 XML、外部实体/DOCTYPE、未知编码声明、材料 ID 重复/缺失、非法占比、压缩块长度、zlib 结束与尾随数据、总字节数及内存限额；不理解的数据会报错。
 
-默认原始数组上限 8 GiB，可用 `--max-raw-gib` 调整；XML 文件上限 512 MiB。材料记录分块解压，表面提取仍需浮点场与网格工作内存。输入较大时先检查尺寸并选择合适的裁剪范围。
+默认完整源的原始数组上限 8 GiB，可用 `--max-raw-gib` 调整；XML 文件上限 512 MiB。裁剪时仍顺序解压和校验全部源块，仅保存 ROI；尚未实现独立块索引随机读取。XML/base64 文本、表面提取的浮点场及网格也会占内存，流式保存不会使这些工作内存消失。输入较大时先检查尺寸并选择合适的裁剪范围。
 
 ## 源码与验证
 
@@ -252,14 +306,17 @@ run.py / run.cmd             命令行与 Windows 拖放入口
 convert_vdata.py             兼容入口
 examples/make_sample.py      纯标准库人工小样生成器
 vdata_standalone/
-  reader.py                  独立格式检查与材料记录解码
-  planes.py                  平面字段解码与实验性界面场
+  reader.py                  独立格式检查、全源校验与流式 ROI 材料记录解码
+  planes.py                  全源平面校验、流式 ROI 解码与实验性界面场
   reconstruction.py          VOF/PLIC 引导的占比重建
-  meshing.py                 表面提取、STL 写出和可选 QEM
+  meshing.py                 表面提取、可选活跃块 mask、STL 写出和 QEM
+  planar_optimize.py         锁边界的严格轴向凸平面重三角化
   storage.py                 全部三角面保留的无损归档与分块读取
   planar.py                  共享顶点 MAT 与 Planar Solid 脚本
   cli.py                     流程、归档、坐标、材料表与 LSF
 docs/tutorial.html           初学者完整图文教程
+docs/upgrade_v030.html        v0.3.0 升级原理、操作与测量
+docs/evidence/v030_validation.json   v0.3.0 验证记录
 docs/assets/                教程图片和图示资源
 tests/                      自造文件与几何的测试
 requirements*.txt            基础、可选和测试依赖
@@ -273,7 +330,9 @@ pyproject.toml               包配置与 vdata-convert 命令
 & $toolPython -m pytest -q
 ```
 
-v0.2.0 已有实现验证结果为 **123 个测试通过，另有 40 个子测试**。测试覆盖格式错误、坐标、几何和归档往返，并实际阻止厂商模块导入、安装目录访问和子进程启动，以检查独立路径。另有 7 个本机真实文件的读取验证，覆盖 um/nm、非零原点、单/多材料、含/不含界面字段；原始字节与独立解码公式相符，已知材料体积与历史量测相符。
+v0.3.0 的测试数量及实际运行结果见[验证记录](docs/evidence/v030_validation.json)。新增检查包括 ROI 与全量切片逐字节一致、记录跨块/chunk、ROI 外错误拒绝、源/区域元数据、平面锁边及回滚、活跃块与默认提取一致。真实 plane/vof XYZ 裁剪与 v0.2.0 对照，体素、平面及网格顶点/面索引/平移全部逐字节一致。
+
+历史 v0.2.0 实现验证为 **123 个测试通过，另有 40 个子测试**。测试覆盖格式错误、坐标、几何和归档往返，并实际阻止厂商模块导入、安装目录访问和子进程启动，以检查独立路径。另有 7 个本机真实文件的读取验证，覆盖 um/nm、非零原点、单/多材料、含/不含界面字段；原始字节与独立解码公式相符，已知材料体积与历史量测相符。
 
 这些验证不认证所有 Coventor 版本、原生界面等价性或 10 nm 光学位置精度。教程区分编码、几何、实际 CAD 导入、电磁求解和实验测量的验证层次。
 

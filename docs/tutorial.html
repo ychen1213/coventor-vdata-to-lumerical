@@ -9,12 +9,13 @@ main{max-width:1120px}section{padding:36px 42px}h2{font-size:28px}h3{margin-top:
 @media(max-width:650px){section{padding:24px 19px}.route{grid-template-columns:1fr 1fr;gap:9px}.route b{font-size:16px}.route button{padding:11px}.route button.active{padding:10px}.toc-groups,.compare{grid-template-columns:1fr}.lead{font-size:18px}h2{font-size:24px}.stage-panel{min-height:0}.toc-groups{gap:7px}}
 @media print{.route button{background:white}.stage-panel{min-height:0}details{break-inside:auto}.bridge{color:#172c38}}
 </style></head><body>
-<header><div class="smallcaps">独立转换器 v0.2 · 完整过程与公共发布说明 · 2026-10-27</div>
+<header><div class="smallcaps">独立转换器 v0.3 · 完整过程与正式升级 · 2026-10-27</div>
 <h1>这份 VDATA 是怎样<br>一步步变成 FDTD 几何的？</h1>
 <p class="lead">先看懂程序原本做了什么，再看懂这次到底改了哪一步。</p>
 <p>全文使用同一个 AH53 硅标记，以及同一个“20 nm 格子里有 25% 硅”的小例子。先顺着文件进入程序、材料被读出、表面被建立、几何被保存的顺序讲；理解完整过程以后，再解释精度和大小这两项改进，最后亲手走通一次。</p></header>
 <main>
 <section id="contents"><h2>这次按三层关系阅读</h2>
+<p class="evidence-note"><strong>v0.3已正式接入流式裁剪，并新增可选平面优化与活跃块提取。</strong>正文先讲稳定的完整转换主线；新增参数、适用条件与真实时间/内存/文件大小对照，请看<a href="upgrade_v030.html">v0.3升级说明</a>。默认重建表面仍与此前一致，平面重三角化需显式加<code>--planar-optimize</code>。</p>
 <p class="evidence-note">本页随公共仓库 <a href="https://github.com/ychen1213/coventor-vdata-to-lumerical">coventor-vdata-to-lumerical</a> 一起发布，可下载后离线打开。文中的 D:\CoventorProjects 路径是作者本机 AH53 案例；原始模型、商业软件和验证环境不包含在源码中。首次下载可先照 <a href="../README.md">README</a> 建立本地 .venv，并使用第7部分的人工小样走通转换。真实案例中的裁剪坐标只适用于对应 AH53 输入。</p>
 <div class="toc-groups"><div><h3>先理解原来的完整过程</h3><nav><a href="#purpose">1. 已有刻蚀结果，程序还要做什么</a><a href="#read">2. 先把文件还原成材料记录</a><a href="#reconstruct">3. 再从材料记录建立三角表面</a></nav></div>
 <div><h3>再回到具体步骤理解改进</h3><nav><a href="#accuracy">4. 精度改进：改变表面的位置推断</a><a href="#store">5. 大小改进：改变同一表面的保存方式</a><a href="#results">6. 按这两项目标分别检查效果</a></nav></div>
@@ -233,7 +234,7 @@ set("material", "Si (Silicon) - Palik");</pre>
 <p>这种思路来自 VOF/PLIC：前者用体积分数描述区域，后者用局部平面近似界面。我们的实现用这些平面建立距离样本，再进行三角化。对于曲面、尖角、薄层或一格内有多个界面的情况，方向可能估计不准，单张平面也未必适用。局部平面满足本格占比，最终连起来的三角表面仍不保证逐格严格守恒。</p>
 <h3>“脱离 SDK”和这次精度优化，是不同阶段的改进</h3>
 <p>之前的对话里经历了几版程序，容易混在一起。把它们放到刚才的流程里，差异就清楚了：</p>
-<div class="table"><table><thead><tr><th>版本</th><th>读取和建立表面由谁完成</th><th>那一次主要解决什么</th></tr></thead><tbody><tr><td>早期 SDK 路线</td><td>关键读取/表面导出交给 Coventor 实现</td><td>借助已有软件取得可用表面</td></tr><tr><td>v0.1 独立路线</td><td>普通 Python 读取，开源算法作 fraction 重建</td><td>转换过程脱离 Coventor SDK</td></tr><tr><td>v0.2 当前路线</td><td>继续独立运行；新增 plane、vof 可选重建</td><td>在不依赖 SDK 的前提下，研究和改善独立表面的精度</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>版本</th><th>读取和建立表面由谁完成</th><th>那一次主要解决什么</th></tr></thead><tbody><tr><td>早期 SDK 路线</td><td>关键读取/表面导出交给 Coventor 实现</td><td>借助已有软件取得可用表面</td></tr><tr><td>v0.1 独立路线</td><td>普通 Python 读取，开源算法作 fraction 重建</td><td>转换过程脱离 Coventor SDK</td></tr><tr><td>v0.2重建升级，v0.3继续沿用</td><td>继续独立运行；新增 plane、vof 可选重建</td><td>在不依赖 SDK 的前提下，研究和改善独立表面的精度</td></tr></tbody></table></div>
 <p><strong>SDK 独立性回答“运行时依赖谁”；重建精度回答“表面是否接近参考”。</strong>前者已经实现，不会自动保证后者。由于新的重建方法有不同适用条件，当前默认仍是 fraction，用户明确选择后才使用 plane 或 vof。</p>
 <p class="bridge">无论你选择哪种重建方法，到这一步都已经得到了一张确定的三角网格。下面暂时把这张网格固定下来：不再移动顶点、不再推断界面，只研究怎样把同样的几何保存得更小。这就是第二项优化。</p></section>
 
@@ -277,7 +278,7 @@ set("material", "Si (Silicon) - Palik");</pre>
 <h3>最后分清三种“内存/大小”</h3>
 <p>文件保存体积是磁盘上的字节数；转换峰值内存是建立占比场、三角面和压缩块时暂时占用的内存；FDTD 求解内存则用于电磁场、材料系数、吸收边界和色散状态。它们属于不同阶段。</p>
 <p>本机完整 fraction→compact 转换约 14.92 秒，峰值进程内存约 863 MB；vof→compact 约 35.97 秒，峰值约 844 MB。这些是转换资源，不是求解时间或电磁内存。相同几何、相同 FDTD 网格与更新算法，不会因为输入文件缩小，就少保存相同比例的场数组。</p>
-<p>程序测试共 123 项及 40 个子测试通过；完整网格的顶点、面索引和位移往返一致；含平面的模型通过闭合和绕向检查。运行验证还拦截了厂商模块、安装目录和子进程调用，确认本次转换没有调用 Coventor SDK。</p>
+<p>上述v0.2基准测试为123项及40个子测试通过。v0.3正式回归为187项及106个子测试通过，完整记录见<a href="evidence/v030_validation.json">升级验证记录</a>。默认流式裁剪后的原始记录和表面数组与原路径逐字节一致；平面优化另检查闭合、绕向、面积、体积和边界。运行验证拦截厂商模块、安装目录和子进程调用，确认转换没有调用 Coventor SDK。</p>
 <p class="bridge">现在你已经知道每个选项改变哪一步，也知道数据证明了什么。下一部分不再同时创建许多实验分支，而是先使用一个小范围和一个输出目录，把“检查输入 → 转换 → 准备导入 → 手工检查”完整走通。</p></section>
 
 <section id="use"><div class="stage">实际操作 · 一条主路线，只有一个输出目录</div><h2>7. 跟着同一份输入，完整做一次转换</h2>
@@ -309,6 +310,7 @@ $outputDir = "D:\CoventorProjects\My_First_AH53_Conversion"
   --crop-um 22.6 25.4 -1 1 -0.5 0.5 `
   --surface fraction --storage compact</pre>
 <p>这里 <code>convert</code> 执行了前面讲的读取、重建和保存；无需先单独运行一个 decode 命令。反引号表示同一条 PowerShell 命令在下一行继续。</p>
+<p>从v0.3开始，上面的crop会在解压时直接保存所选区域，同时继续校验完整源；原点与区域尺寸单独传给重建，避免二次裁剪。若要减少规则平面的三角形，在同一命令中加<code>--planar-optimize</code>；它保留合格平面的几何覆盖及边界点，改变三角划分。详见<a href="upgrade_v030.html">升级说明与实测</a>。</p>
 <div class="table"><table><thead><tr><th>参数</th><th>这次选择的含义</th></tr></thead><tbody><tr><td>--crop-um 六个数字</td><td>X 从22.6到25.4、Y从−1到1、Z从−0.5到0.5，单位µm。截取小范围，先看清方向和结果。</td></tr><tr><td>--surface fraction</td><td>在“建立表面”一步使用原 0.5 占比规则。</td></tr><tr><td>--storage compact</td><td>在“保存几何”一步选择 VMESH，不立即写出大型 STL。</td></tr><tr><td>没有 --reduction 参数</td><td>不进行 QEM 减面。无损压缩与减面无关。</td></tr></tbody></table></div>
 <p>终端成功时显示 <code>status: complete</code> 和实际输出路径。这个单实体、无平面字段的例子，基础输出有 6 个文件：</p>
 <pre>My_First_AH53_Conversion/
@@ -457,6 +459,7 @@ set("facets",vdata_facets);
     meshing.py                第②步三角化、几何检查、可选QEM与STL写出
     storage.py                第③步无损网格压缩与读取
     planar.py                 第④步MAT及导入脚本文本生成
+    planar_optimize.py        严格轴向凸平面的锁边界重三角化
   tests/                      各步骤和完整流程的测试
 
 D:\CoventorProjects\VDATA_Standalone_Validation\
@@ -492,7 +495,7 @@ py -3.12 -m venv .venv
 <p class="small">公开资料用于解释通用算法和正式导入接口；VDATA 字节布局与平面坐标约定以本机真实文件及本次证据为依据。不同来源的验证范围在文中分别说明。无厂商 SDK、二进制或许可证文件包含在源码中。</p>
 </div>
 </section>
-<footer>本教程讲解的是已实现的 v0.2 转换过程；本次修订改变教学顺序和说明，不改变转换算法或此前测量结果。MB=10⁶字节。图、交互及正文均可离线使用；原教程备份保存在验证目录。</footer>
+<footer>本教程随v0.3发布。基础重建讲解和v0.2历史对照仍保留；v0.3的流式裁剪、可选平面优化和活跃块性能另见升级说明。MB=10⁶字节。图、交互及正文均可离线使用。</footer>
 </main>
 <script>
 const slider=document.getElementById('fraction-slider');

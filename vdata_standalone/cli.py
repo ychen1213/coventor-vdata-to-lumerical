@@ -239,6 +239,8 @@ def convert(args):
         raise ValueError("Isosurface level must be strictly between zero and one")
     if not math.isfinite(args.reduction) or not 0 <= args.reduction < 1:
         raise ValueError("Reduction is the fraction of faces to remove and must lie in [0,1)")
+    if args.planar_min_faces < 4:
+        raise ValueError("Planar minimum face count must be at least 4")
     if args.max_sampled_error_nm is not None and (not math.isfinite(args.max_sampled_error_nm) or args.max_sampled_error_nm < 0):
         raise ValueError("Sampled error limit must be finite and nonnegative")
     if args.max_sampled_error_nm is not None and args.reduction == 0:
@@ -254,7 +256,9 @@ def convert(args):
         "runtime": _versions(), "coventor_required": False, "lumerical_required_for_conversion": False,
         "vendor_api_calls": [], "optical_simulation_run": False,
         "surface_mode": args.surface, "storage_mode": args.storage,
-        "source_metadata": meta, "objects": [], "files": [],
+        "planar_optimization_requested": args.planar_optimize,
+        "active_blocks_requested": args.active_blocks,
+        "source_metadata": meta, "objects": [], "files": [], "stage_seconds": {},
         "limitations": [
             "Supported VoxelXML byte-record layout only; file extension alone does not identify a supported format.",
             "The selected reconstruction interpolates a cell-centred scalar field; the surface is an approximation.",
@@ -271,18 +275,29 @@ def convert(args):
     region = None
     try:
         print("Decoding VoxelXML directly (no vendor SDK)...", flush=True)
-        raw, decoded = decode_vdata(source, cache, max_raw_bytes=int(args.max_raw_gib * 1024 ** 3))
+        stage_started = time.perf_counter()
+        source_crop = list(zip(lo.tolist(), hi.tolist()))
+        raw, decoded = decode_vdata(source, cache, crop_indices=source_crop,
+                                   max_raw_bytes=int(args.max_raw_gib * 1024 ** 3))
         if decoded["source_sha256"] != meta["source_sha256"]:
             raise RuntimeError("Source changed between inspection and decoding")
+        manifest["stage_seconds"]["voxel_decode"] = time.perf_counter() - stage_started
         manifest["source_metadata"] = decoded
         if meta["has_plane_equations"] and (args.surface == "plane" or not args.skip_voxels):
+            stage_started = time.perf_counter()
             from .planes import decode_plane_equations
-            planes, plane_meta = decode_plane_equations(source, max_raw_bytes=int(args.max_raw_gib * 1024 ** 3))
+            planes, plane_meta = decode_plane_equations(source, crop_indices=source_crop,
+                max_raw_bytes=int(args.max_raw_gib * 1024 ** 3))
             if plane_meta["source_sha256"] != meta["source_sha256"]:
                 raise RuntimeError("Source changed between material and PlaneEquations decoding")
             manifest["plane_metadata"] = plane_meta
-        region = raw[tuple(slice(int(a), int(b)) for a, b in zip(lo, hi))]
+            manifest["stage_seconds"]["plane_decode"] = time.perf_counter() - stage_started
+        # Decoding already retained exactly this region. Keep source metadata
+        # intact and give the mesher a separate local grid to avoid a second
+        # crop or applying the origin offset twice.
+        region = raw
         crop_origin = np.asarray(meta["origin_m"]) + lo * meta["voxel_size_m"]
+        mesh_meta = {**decoded, **decoded["region_metadata"]}
         voxel_meta = {
             "schema": "voxel-material-records-v1", "axis_order": "XYZ", "storage_order": "C",
             "dimensions_xyz": [int(v) for v in hi - lo], "origin_m": crop_origin.tolist(),
@@ -295,16 +310,18 @@ def convert(args):
             "physical_accuracy": "Preserves the selected source byte records; not a certification of the physical process model.",
         }
         if not args.skip_voxels:
+            stage_started = time.perf_counter()
             print("Saving lossless material/fraction records...", flush=True)
             np.savez_compressed(out / "voxels.npz", raw=region)
             write_json(out / "voxel_metadata.json", voxel_meta)
             if planes is not None:
-                np.savez_compressed(out / "planes.npz", plane_equations=planes[tuple(slice(int(a), int(b)) for a, b in zip(lo, hi))])
+                np.savez_compressed(out / "planes.npz", plane_equations=planes)
                 write_json(out / "plane_metadata.json", {**plane_meta, "crop_origin_m": crop_origin.tolist(),
                     "crop_source_indices": [lo.tolist(), hi.tolist()], "crop_dimensions_xyz": (hi - lo).tolist(),
                     "archive": "planes.npz", "units_note": "n and d are kept as source bytes; geometric interpretation is an explicit surface-mode assumption"})
                 voxel_meta["plane_equations_archive"] = "planes.npz"
                 write_json(out / "voxel_metadata.json", voxel_meta)
+            manifest["stage_seconds"]["voxel_archive"] = time.perf_counter() - stage_started
         materials = meta["materials"]
         selected = [int(v) for v in args.materials.split(",")] if args.materials else [int(m["id"]) for m in materials if not _background(m)]
         if len(set(selected)) != len(selected):
@@ -316,6 +333,7 @@ def convert(args):
         volumes = {}
         active = []
         # Chunk across X so the volume audit never allocates another full float volume.
+        stage_started = time.perf_counter()
         for mid in palette:
             total = 0.0
             for begin in range(0, region.shape[0], 16):
@@ -325,19 +343,39 @@ def convert(args):
             if mid in selected and total > 0:
                 active.append(mid)
         manifest["material_volumes_m3"] = volumes
+        manifest["stage_seconds"]["material_volume_audit"] = time.perf_counter() - stage_started
         if args.reduction and len(active) != 1:
             raise ValueError("QEM currently requires exactly one exported solid; shared multi-material interfaces are not reduced independently")
+        if args.planar_optimize and len(active) != 1:
+            raise ValueError("Planar optimization requires exactly one exported solid; shared multi-material interfaces must be optimized together")
         if args.command == "convert":
             from .meshing import mesh_material, write_binary_stl
             (out / "meshes").mkdir()
             for mid in active:
                 print("Reconstructing material {} using {} field...".format(mid, args.surface), flush=True)
-                vertices, faces, report = mesh_material(raw, meta, mid, level=args.level,
-                    crop_indices=list(zip(lo.tolist(), hi.tolist())), step_size=1, surface=args.surface, planes=planes)
+                mesh_started = time.perf_counter()
+                vertices, faces, report = mesh_material(raw, mesh_meta, mid, level=args.level,
+                    step_size=1, surface=args.surface, planes=planes, active_blocks=args.active_blocks)
+                report["source_crop_indices_xyz"] = [list(pair) for pair in source_crop]
+                report["grid_origin_m"] = report["source_origin_m"]
+                report["grid_crop_indices_xyz"] = report["crop_indices_xyz"]
+                report["source_origin_m"] = list(meta["origin_m"])
+                report["crop_indices_xyz"] = [list(pair) for pair in source_crop]
+                if decoded["crop_applied"]:
+                    report["warnings"].append("The streamed source crop replaces exterior material with background and creates artificial closed cut surfaces.")
+                report["extraction_seconds"] = time.perf_counter() - mesh_started
                 if len(faces) == 0:
                     retained = "source VDATA" if args.skip_voxels else "voxels.npz"
                     manifest.setdefault("warnings", []).append("Material {} has positive volume but no level-{} surface; records remain in {}".format(mid, args.level, retained))
                     continue
+                if args.planar_optimize:
+                    from .planar_optimize import optimize_planar_mesh
+                    print("Retriangulating eligible exact planar patches with locked boundaries...", flush=True)
+                    planar_started = time.perf_counter()
+                    vertices, faces, planar_report = optimize_planar_mesh(vertices, faces,
+                        min_faces=args.planar_min_faces)
+                    planar_report["elapsed_seconds"] = time.perf_counter() - planar_started
+                    report["planar_optimization"] = planar_report
                 if args.reduction:
                     from .meshing import simplify_mesh
                     print("Reducing faces and measuring additional sampled distance...", flush=True)
@@ -345,6 +383,7 @@ def convert(args):
                     report["qem"] = reduction_report
                 relative_stl = npz_path = compact_path = None
                 stl_report = compact_report = None
+                export_started = time.perf_counter()
                 if args.storage in {"standard", "both"}:
                     relative_stl = "meshes/material_{:04d}.stl".format(mid)
                     stl_report = write_binary_stl(out / relative_stl, vertices, faces, coordinate_unit="um")
@@ -363,6 +402,8 @@ def convert(args):
                 obj = {"material_id": mid, "source_name": name, "fdtd_material": optical,
                        "stl": relative_stl, "indexed_mesh": npz_path, "compact_mesh": compact_path,
                        "compact_storage": compact_report, "stl_coordinate_unit": "um",
+                       "mesh_export_seconds": time.perf_counter() - export_started,
+                       "exported_vertex_count": len(vertices), "exported_face_count": len(faces),
                        "translation_m": report["translation_m"], "reconstruction": report, "stl_export": stl_report}
                 manifest["objects"].append(obj)
             if len(active) > 1:
@@ -415,6 +456,10 @@ def build_parser():
     planar = sub.add_parser("export-planar", help="Export indexed MAT and addplanarsolid script, preserving all triangles")
     planar.add_argument("folder")
     planar.add_argument("--material-map")
+    optimize = sub.add_parser("optimize-mesh", help="Retriangulate eligible exact planar patches in one existing closed mesh; no VDATA decoding")
+    optimize.add_argument("input", help="Existing .vmesh or indexed .npz mesh")
+    optimize.add_argument("--output", required=True, help="New .vmesh path; never overwrite")
+    optimize.add_argument("--min-faces", type=int, default=128)
     pack = sub.add_parser("pack-mesh", help="Losslessly repack an existing indexed NPZ mesh, preserving every vertex and face")
     pack.add_argument("input")
     pack.add_argument("--output", required=True, help="New .vmesh archive path")
@@ -434,6 +479,15 @@ def build_parser():
                        help="standard: STL+NPZ; compact: lossless .vmesh only; both: all formats. No face reduction implied")
         p.add_argument("--surface", choices=("fraction", "vof", "plane"), default="fraction",
                        help="fraction: historical 0.5 isosurface; vof: experimental PLIC-guided field; plane: experimental saved planes in local voxel-corner convention")
+        if name == "convert":
+            p.add_argument("--planar-optimize", action="store_true",
+                           help="Retriangulate eligible exact axis-aligned convex planar patches; lock all original patch boundary vertices")
+            p.add_argument("--planar-min-faces", type=int, default=128,
+                           help="Minimum patch face count for planar optimization; default 128")
+            p.add_argument("--active-blocks", action="store_true",
+                           help="Use experimental conservative block min/max mask for the same Lewiner extraction")
+        else:
+            p.set_defaults(planar_optimize=False, planar_min_faces=128, active_blocks=False)
     return parser
 
 
@@ -442,6 +496,29 @@ def main(argv=None):
     try:
         if args.command == "inspect":
             print(json.dumps(inspect_vdata(args.input), ensure_ascii=False, indent=2, allow_nan=False))
+            return 0
+        if args.command == "optimize-mesh":
+            import numpy as np
+            from .planar_optimize import optimize_planar_mesh
+            from .storage import read_mesh_archive, write_mesh_archive
+            src = Path(args.input).expanduser().resolve()
+            dst = Path(args.output).expanduser().resolve()
+            if dst.exists():
+                raise ValueError("Optimization destination already exists")
+            source_hash = file_hash(src)
+            if src.suffix.lower() == ".vmesh":
+                vertices, faces, translation, _ = read_mesh_archive(src)
+            else:
+                with np.load(src, allow_pickle=False) as archive:
+                    vertices, faces, translation = (archive[k] for k in
+                        ("vertices_local_m", "faces", "translation_m"))
+            vertices, faces, optimization = optimize_planar_mesh(vertices, faces, min_faces=args.min_faces)
+            if file_hash(src) != source_hash:
+                raise ValueError("Source mesh changed during optimization")
+            written = write_mesh_archive(dst, vertices, faces, translation,
+                metadata={"source_mesh_sha256": source_hash, "planar_optimization": optimization,
+                    "scope": "One mesh only; not a coordinated multi-material interface optimization"})
+            print(json.dumps({"optimization": optimization, "archive": written}, ensure_ascii=False, indent=2))
             return 0
         if args.command == "pack-mesh":
             import numpy as np

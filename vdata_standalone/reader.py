@@ -256,33 +256,173 @@ def _inflate_block(reader, packed_size, expected_size):
         raise ValueError("Incomplete zlib stream or mismatched raw size")
 
 
-def _validate_records(raw, meta):
+def _normalize_crop(dimensions, crop_indices):
+    """Validate source-XYZ half-open index ranges; never silently coerce floats."""
     import numpy as np
-    records = raw.reshape(-1, 3)
-    allowed = np.zeros(256, dtype=bool)
-    allowed[[m["id"] for m in meta["materials"]]] = True
-    present = np.zeros(256, dtype=bool)
-    for start in range(0, len(records), 1024 * 1024):
-        part = records[start:start + 1024 * 1024]
-        ff, m1, m2 = part[:, 0], part[:, 1], part[:, 2]
+    if crop_indices is None:
+        return tuple((0, n) for n in dimensions)
+    try:
+        supplied = tuple(crop_indices)
+    except TypeError as exc:
+        raise ValueError("crop_indices must contain three (start, stop) integer pairs") from exc
+    if len(supplied) != 3:
+        raise ValueError("crop_indices must contain three (start, stop) integer pairs")
+    result = []
+    for axis, (bounds, size) in enumerate(zip(supplied, dimensions)):
+        try:
+            pair = tuple(bounds)
+            if len(pair) != 2 or any(isinstance(v, (bool, np.bool_)) for v in pair):
+                raise TypeError
+            lo, hi = (operator.index(v) for v in pair)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("crop_indices must contain three (start, stop) integer pairs") from exc
+        if not 0 <= lo < hi <= size:
+            raise ValueError(f"crop_indices axis {axis} must satisfy 0 <= start < stop <= {size}")
+        result.append((lo, hi))
+    return tuple(result)
+
+
+def _crop_metadata(meta, crop):
+    """Keep source metadata intact and describe the returned region explicitly."""
+    dimensions = [hi - lo for lo, hi in crop]
+    origin = [o + lo * meta["voxel_size_m"]
+              for o, (lo, _) in zip(meta["origin_m"], crop)]
+    upper = [o + n * meta["voxel_size_m"] for o, n in zip(origin, dimensions)]
+    region = {"dimensions_xyz": dimensions, "origin_m": origin,
+              "bounds_m": [origin, upper], "origin_kind": "lower_corner",
+              "voxel_size_m": meta["voxel_size_m"], "voxel_count": math.prod(dimensions),
+              "source_crop_indices_xyz": [list(pair) for pair in crop]}
+    return {"crop_indices_xyz": [list(pair) for pair in crop],
+            "crop_dimensions_xyz": dimensions, "crop_origin_m": origin,
+            "crop_applied": any(lo != 0 or hi != n for (lo, hi), n in
+                                zip(crop, meta["dimensions_xyz"])),
+            "region_metadata": region}
+
+
+def _crop_intervals(dimensions, crop, record_bytes):
+    """Yield merged source byte intervals in output C-order, without a row table."""
+    _, ny, nz = dimensions
+    (xlo, xhi), (ylo, yhi), (zlo, zhi) = crop
+    pending = None
+    for x in range(xlo, xhi):
+        if zlo == 0 and zhi == nz:
+            spans = (((x * ny + ylo) * nz * record_bytes,
+                      (x * ny + yhi) * nz * record_bytes),)
+        else:
+            spans = (((x * ny + y) * nz * record_bytes + zlo * record_bytes,
+                      (x * ny + y) * nz * record_bytes + zhi * record_bytes)
+                     for y in range(ylo, yhi))
+        for start, end in spans:
+            if pending is not None and pending[1] == start:
+                pending = (pending[0], end)
+            else:
+                if pending is not None:
+                    yield pending
+                pending = (start, end)
+    if pending is not None:
+        yield pending
+
+
+class _CropWriter:
+    """Copy only selected byte intervals while consuming every source byte."""
+    def __init__(self, flat, dimensions, crop, record_bytes, *, digest=None):
+        self.flat = flat
+        self.intervals = iter(_crop_intervals(dimensions, crop, record_bytes))
+        self.interval = next(self.intervals, None)
+        self.source_count = self.stored_count = 0
+        self.digest = digest
+
+    def feed(self, chunk):
+        import numpy as np
+        start, end = self.source_count, self.source_count + len(chunk)
+        while self.interval is not None and self.interval[0] < end:
+            lo, hi = self.interval
+            first, last = max(start, lo), min(end, hi)
+            if last > first:
+                selected = memoryview(chunk)[first - start:last - start]
+                count = len(selected)
+                self.flat[self.stored_count:self.stored_count + count] = np.frombuffer(selected, dtype=np.uint8)
+                self.stored_count += count
+                if self.digest is not None:
+                    self.digest.update(selected)
+            if hi <= end:
+                self.interval = next(self.intervals, None)
+            else:
+                break
+        self.source_count = end
+
+
+class _RecordStream:
+    """Reassemble fixed-size records across decompressor chunks and zlib blocks."""
+    def __init__(self, record_bytes, validate):
+        self.record_bytes = record_bytes
+        self.validate = validate
+        self.carry = b""
+
+    def feed(self, chunk):
+        data = self.carry + chunk if self.carry else chunk
+        count = len(data) // self.record_bytes * self.record_bytes
+        if count:
+            self.validate(memoryview(data)[:count])
+        self.carry = data[count:]
+
+    def finish(self):
+        if self.carry:
+            raise ValueError("Decoded payload ends within a record")
+
+
+class _VoxelValidator:
+    """Bounded online validation; 256-entry tables avoid sorting material IDs."""
+    def __init__(self, meta):
+        import numpy as np
+        self.allowed = np.zeros(256, dtype=bool)
+        self.allowed[[m["id"] for m in meta["materials"]]] = True
+        self.present = np.zeros(256, dtype=bool)
+
+    def __call__(self, data):
+        import numpy as np
+        records = np.frombuffer(data, dtype=np.uint8).reshape(-1, 3)
+        ff, m1, m2 = records[:, 0], records[:, 1], records[:, 2]
         if np.any(ff > 129):
             raise ValueError("Invalid fraction code: expected 0..128 or single-material code 129")
         if np.any((ff == 129) & (m1 != m2)):
             raise ValueError("Single-material ff=129 record must have m1=m2")
-        ids = np.unique(part[:, 1:])
-        if np.any(~allowed[ids]):
-            raise ValueError(f"Unknown material IDs in voxel data: {ids[~allowed[ids]].tolist()}")
-        present[ids] = True
-    meta["material_ids_in_records"] = np.flatnonzero(present).tolist()
-    meta["record_validation_performed"] = True
+        self.present[m1] = True
+        self.present[m2] = True
+        unknown = self.present & ~self.allowed
+        if np.any(unknown):
+            raise ValueError(f"Unknown material IDs in voxel data: {np.flatnonzero(unknown).tolist()}")
+
+    def report(self, meta):
+        import numpy as np
+        meta["material_ids_in_records"] = np.flatnonzero(self.present).tolist()
+        meta["record_validation_performed"] = True
+        meta["record_validation_scope"] = "entire source, including records outside the crop"
 
 
-def decode_vdata(path, output_path=None, *, max_raw_bytes=DEFAULT_MAX_RAW_BYTES):
-    """Decode exact source record bytes to a uint8 ``(NX,NY,NZ,3)`` array.
+def _validate_records(raw, meta):
+    """Compatibility helper using the same bounded validator as streaming decode."""
+    validator = _VoxelValidator(meta)
+    flat = raw.reshape(-1).view("uint8")
+    stream = _RecordStream(3, validator)
+    for start in range(0, flat.size, _CHUNK):
+        stream.feed(flat[start:start + _CHUNK].tobytes())
+    stream.finish()
+    validator.report(meta)
+
+
+def decode_vdata(path, output_path=None, *, max_raw_bytes=DEFAULT_MAX_RAW_BYTES,
+                 crop_indices=None):
+    """Decode exact source bytes to a uint8 ``(NX,NY,NZ,3)`` array or XYZ crop.
 
     ``output_path`` creates a new .npy memory map and refuses to overwrite an
     existing file.  Its parent directory must exist.  If validation fails the
-    newly created incomplete output is removed.  There is no binarization,
+    newly created incomplete output is removed. ``crop_indices`` is three
+    source-XYZ half-open integer pairs. All source records are decompressed and
+    validated, but only ROI bytes are allocated/stored. The byte cap applies to
+    the full source, so cropping cannot bypass it. Source dimensions/origin
+    remain in metadata; ``region_metadata`` describes the returned array.
+    There is no binarization,
     resampling, smoothing or surface reconstruction in this operation.
     """
     import numpy as np
@@ -299,7 +439,9 @@ def decode_vdata(path, output_path=None, *, max_raw_bytes=DEFAULT_MAX_RAW_BYTES)
         raise ValueError(f"Decoded size {expected} exceeds max_raw_bytes={cap}")
     if expected > np.iinfo(np.intp).max:
         raise ValueError("Decoded array is too large for this Python platform")
-    shape = tuple(meta["dimensions_xyz"]) + (3,)
+    crop = _normalize_crop(meta["dimensions_xyz"], crop_indices)
+    meta.update(_crop_metadata(meta, crop))
+    shape = tuple(meta["crop_dimensions_xyz"]) + (3,)
     target = None if output_path is None else Path(output_path).resolve()
     raw = None
     flat = None
@@ -315,6 +457,9 @@ def decode_vdata(path, output_path=None, *, max_raw_bytes=DEFAULT_MAX_RAW_BYTES)
             created = True
             raw = np.lib.format.open_memmap(target, mode="w+", dtype=np.uint8, shape=shape)
         flat = raw.reshape(-1)
+        writer = _CropWriter(flat, meta["dimensions_xyz"], crop, 3)
+        validator = _VoxelValidator(meta)
+        records = _RecordStream(3, validator)
         count = 0
         blocks = 0
         for node in nodes:
@@ -331,14 +476,18 @@ def decode_vdata(path, output_path=None, *, max_raw_bytes=DEFAULT_MAX_RAW_BYTES)
                 if count + unpacked_size > expected:
                     raise ValueError("Declared block output exceeds the expected array size")
                 for chunk in _inflate_block(reader, packed_size, unpacked_size):
-                    end = count + len(chunk)
-                    flat[count:end] = np.frombuffer(chunk, dtype=np.uint8)
-                    count = end
+                    records.feed(chunk)
+                    writer.feed(chunk)
+                    count += len(chunk)
                 blocks += 1
         if count != expected:
             raise ValueError(f"Decoded length {count} differs from expected {expected}")
-        _validate_records(raw, meta)
+        records.finish()
+        if writer.stored_count != raw.nbytes or writer.interval is not None:
+            raise ValueError("Stored crop byte count does not match its dimensions")
+        validator.report(meta)
         meta.update({"compressed_blocks": blocks, "decoded_raw_bytes": count,
+                     "stored_raw_bytes": writer.stored_count,
                      "raw_dtype": "uint8", "raw_shape": list(shape),
                      "decoded_bytes_preserved": True})
         if target is not None:
@@ -348,6 +497,8 @@ def decode_vdata(path, output_path=None, *, max_raw_bytes=DEFAULT_MAX_RAW_BYTES)
     except Exception:
         if created:
             flat = None
+            if "writer" in locals():
+                writer.flat = None
             if raw is not None and getattr(raw, "_mmap", None) is not None:
                 raw._mmap.close()
             raw = None

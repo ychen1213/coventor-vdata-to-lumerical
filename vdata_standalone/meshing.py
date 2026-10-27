@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import struct
 import tempfile
+import time
 from typing import Any
 
 import numpy as np
@@ -207,9 +208,74 @@ def audit_mesh(vertices: Any, faces: Any, *, chunk_size: int = 200_000,
     return report
 
 
+def _active_block_mask(field: np.ndarray, level: float, *, step_size: int = 1,
+                       block_size: int | tuple[int, int, int] = (32, 32, 8)) -> tuple[np.ndarray, dict[str, Any]]:
+    """Mask definitely inactive MC regions without changing a sample value.
+
+    Blocks partition *cell lower corners*, not independent volumes.  A block
+    reduction includes the shared upper samples, up to ``step_size`` beyond
+    its lower-corner range.  If its min/max straddle or touch the isovalue, the
+    full sample box is enabled.  This also retains one cell halo on its lower
+    sides.  Equal-to-level samples are deliberately not classified by sign.
+
+    scikit-image 0.26's Cython loop tests ``mask[z+st, y+st, x+st]`` before
+    loading a cube.  The input array's XYZ axes are untouched by this internal
+    variable naming.  See src/skimage/measure/_marching_cubes_lewiner_cy.pyx
+    in the upstream v0.26.0 tag.  Both the lower and upper corners of every
+    potentially crossing cell are inside an enabled sample box, so the mask
+    remains conservative under corner-based masking as well.  Extraction is
+    still one global Lewiner call; there are no new per-block crop caps.
+    """
+    sizes = np.asarray(block_size)
+    if sizes.ndim == 0:
+        sizes = np.repeat(sizes, 3)
+    if (sizes.shape != (3,) or not np.issubdtype(sizes.dtype, np.integer)
+            or np.any(sizes < 1)):
+        raise MeshingError("active block_size must contain positive XYZ integers")
+    if (isinstance(step_size, bool) or not isinstance(step_size, (int, np.integer))
+            or step_size < 1):
+        raise MeshingError("active step_size must be a positive integer")
+    if field.ndim != 3 or min(field.shape) <= step_size:
+        raise MeshingError("active-block field must have three axes larger than step_size")
+    started = time.perf_counter()
+    mask = np.zeros(field.shape, dtype=np.bool_)
+    active = total = 0
+    cell_shape = tuple(int(n) - int(step_size) for n in field.shape)
+    for x in range(0, cell_shape[0], int(sizes[0])):
+        x_end = min(x + int(sizes[0]), cell_shape[0]) + int(step_size)
+        for y in range(0, cell_shape[1], int(sizes[1])):
+            y_end = min(y + int(sizes[1]), cell_shape[1]) + int(step_size)
+            for z in range(0, cell_shape[2], int(sizes[2])):
+                z_end = min(z + int(sizes[2]), cell_shape[2]) + int(step_size)
+                part = field[x:x_end, y:y_end, z:z_end]
+                minimum, maximum = float(part.min()), float(part.max())
+                total += 1
+                # Uniform level-valued blocks are MC case 0 (no surface).
+                # Nonuniform ties stay enabled to preserve Lewiner decisions.
+                if minimum <= level <= maximum and minimum != maximum:
+                    mask[x:x_end, y:y_end, z:z_end] = True
+                    active += 1
+    enabled_samples = int(np.count_nonzero(mask))
+    return mask, {
+        "enabled": True, "block_cells_xyz": sizes.tolist(),
+        "total_blocks": total, "active_blocks": active,
+        "active_block_fraction": active / total if total else 0.0,
+        "mask_enabled_samples": enabled_samples,
+        "mask_total_samples": int(mask.size),
+        "mask_coverage_fraction": enabled_samples / mask.size,
+        "mask_bytes": int(mask.nbytes),
+        "preprocessing_seconds": time.perf_counter() - started,
+        "shared_upper_samples": int(step_size),
+        "lower_cell_halo": 1,
+        "geometry_samples_modified": False,
+        "global_extraction": True,
+    }
+
+
 def mesh_material(raw: np.ndarray, meta: dict[str, Any], material_id: int, *,
                   level: float = 0.5, crop_indices: Any = None,
-                  step_size: int = 1, surface: str = "fraction", planes=None) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+                  step_size: int = 1, surface: str = "fraction", planes=None,
+                  active_blocks: bool = False) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Reconstruct one material's fraction isosurface in local SI metres.
 
     ``raw`` is the reader's uint8 XYZ array with shape ``(Nx, Ny, Nz, 3)``.
@@ -220,7 +286,11 @@ def mesh_material(raw: np.ndarray, meta: dict[str, Any], material_id: int, *,
     independently; shared interfaces and triple junctions are not guaranteed
     conforming. The default is the historical fraction isosurface. Optional
     vof and plane modes build a distance-like field before zero-level MC;
-    neither mode is an exact union of piecewise interface polygons.
+    neither mode is an exact union of piecewise interface polygons. Optional
+    ``active_blocks`` builds a conservative mask on the already padded field;
+    it trades an additional one-byte-per-sample array and preprocessing for
+    skipping homogeneous regions within the same global extraction. It does
+    not reduce output geometry, field construction, or the later mesh audit.
     """
     from skimage.measure import marching_cubes
     from .reader import fraction_for_material
@@ -240,6 +310,8 @@ def mesh_material(raw: np.ndarray, meta: dict[str, Any], material_id: int, *,
         raise MeshingError("level must be finite and strictly between zero and one")
     if surface not in {"fraction", "vof", "plane"}:
         raise MeshingError("surface must be fraction, vof or plane")
+    if not isinstance(active_blocks, (bool, np.bool_)):
+        raise MeshingError("active_blocks must be a boolean")
     if surface != "fraction" and level != 0.5:
         raise MeshingError("Distance-based modes use zero distance; --level only applies to fraction mode")
     if surface != "fraction" and step_size != 1:
@@ -279,6 +351,7 @@ def mesh_material(raw: np.ndarray, meta: dict[str, Any], material_id: int, *,
         "translation_m": translation.tolist(), "vertex_coordinates": "local_metres",
         "source_fraction_volume_m3": source_volume,
         "plane_equations_used": False, "warnings": warnings,
+        "active_blocks": {"enabled": bool(active_blocks)},
     }
     extraction_level = float(level)
     exterior_value = 0.0
@@ -319,6 +392,8 @@ def mesh_material(raw: np.ndarray, meta: dict[str, Any], material_id: int, *,
         report.update({"orientation_flipped": False, "empty_reason": "No fraction sample exceeds the selected isovalue.",
                        "volume_difference_m3": -source_volume,
                        "volume_relative_difference": -1.0 if source_volume else None})
+        if active_blocks:
+            report["active_blocks"]["skipped_reason"] = "empty material field"
         return vertices, faces, report
     # A larger upper padding for strided extraction ensures the last sampled
     # plane is zero.  With step_size=1 this is exactly one sample per side.
@@ -331,14 +406,20 @@ def mesh_material(raw: np.ndarray, meta: dict[str, Any], material_id: int, *,
         padded = np.pad(fraction, [(1, p) for p in high_pad], mode="constant", constant_values=exterior_value)
     mc_spacing = tuple(spacing) if surface == "fraction" else (1., 1., 1.)
     del fraction
+    mask = None
+    if active_blocks:
+        mask, report["active_blocks"] = _active_block_mask(
+            padded, extraction_level, step_size=int(step_size))
+    extraction_started = time.perf_counter()
     try:
         vertices, faces, _normals, _values = marching_cubes(
             padded, level=extraction_level, spacing=mc_spacing,
             gradient_direction=gradient_direction, step_size=int(step_size),
-            allow_degenerate=False, method="lewiner")
+            allow_degenerate=False, method="lewiner", mask=mask)
     except RuntimeError as exc:
         raise MeshingError("No surface could be extracted; try step_size=1 or a different isovalue") from exc
-    del padded, _normals, _values
+    report["marching_cubes_seconds"] = time.perf_counter() - extraction_started
+    del padded, mask, _normals, _values
     vertices = np.asarray(vertices, dtype=np.float64)
     if surface != "fraction":
         vertices *= spacing

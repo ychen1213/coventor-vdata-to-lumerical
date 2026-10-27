@@ -1,6 +1,6 @@
 include README.md CHANGELOG.md
 include run.py run.cmd convert_vdata.py
 include requirements*.txt
-recursive-include docs *.html *.svg *.png
+recursive-include docs *.html *.svg *.png *.json
 recursive-include tests *.py
 recursive-include examples *.py
