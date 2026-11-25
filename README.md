@@ -6,6 +6,8 @@
 
 当前版本 **0.4.0**，更新日期 **2026-10-28**。新增严格共面多边形出口：复用已有重建表面，减少交给 CAD 的面片；可选清理未引用顶点。默认表面重建不变，不自动启用合并或 QEM。先看[共面路线的原理与操作](docs/coplanar.html)及[版本变化](CHANGELOG.md)；上一版的流式裁剪、旧平面重三角化和活跃块提取见 [v0.3.0 升级报告](docs/upgrade_v030.html)。
 
+可选示例演示如何对 AH53 的六条长侧壁逐高度拉直、局部减面并导出到 Lumerical。详见[侧壁拉直与局部减面](examples/ah53_sidewall_straightening/README.md)。
+
 ## 先安装，再完成第一次转换
 
 以下命令在 Windows PowerShell 中执行。已验证环境为普通 **CPython 3.12**；项目声明支持 Python 3.10+，其他版本和系统仍取决于开源依赖的可用性。没有安装 Coventor 或 Lumerical，也可以完成这里的转换。
